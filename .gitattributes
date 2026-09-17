@@ -1,0 +1,32 @@
+# Normalización de fin de línea
+* text=auto
+
+# Código / texto (LF)
+*.cs        text diff=csharp
+*.asmdef    text
+*.json      text
+*.md        text
+*.shader    text
+*.uxml      text
+*.uss       text
+
+# Archivos YAML de Unity: tratarlos como texto y usar el merge de Unity
+*.unity           text merge=unityyamlmerge eol=lf
+*.asset           text merge=unityyamlmerge eol=lf
+*.prefab          text merge=unityyamlmerge eol=lf
+*.meta            text merge=unityyamlmerge eol=lf
+*.controller      text merge=unityyamlmerge eol=lf
+*.anim            text merge=unityyamlmerge eol=lf
+*.mat             text merge=unityyamlmerge eol=lf
+*.scenetemplate   text merge=unityyamlmerge eol=lf
+
+# Binarios (cuando lleguen los assets en fases siguientes)
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.mp3  binary
+*.wav  binary
+*.ogg  binary
+*.ttf  binary
+*.otf  binary
