@@ -1,0 +1,16 @@
+{
+    "name": "ElViaje.App",
+    "rootNamespace": "ElViaje.App",
+    "references": [
+        "ElViaje.Game"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

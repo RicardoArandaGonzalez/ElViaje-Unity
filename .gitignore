@@ -10,6 +10,7 @@
 /[Uu]ser[Ss]ettings/
 /[Mm]emoryCaptures/
 /[Rr]ecordings/
+/UIElementsSchema/
 
 # Autogenerados de IDE / MSBuild
 .vs/
