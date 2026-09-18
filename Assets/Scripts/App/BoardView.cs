@@ -52,6 +52,8 @@ namespace ElViaje.App
         public Action<Difficulty, Starter> OnStartGame;
         public Action OnToggleMute;
         public bool Muted;
+        public bool HasSave;
+        public Action OnContinue;
 
         public void Refresh() => ReRender();
 
@@ -895,6 +897,12 @@ namespace ElViaje.App
             title.style.whiteSpace = WhiteSpace.Normal;
             left.Add(title);
             left.Add(Para("Reglamento v2.1 Beta · Aventura solitario", 10, InkMuted));
+            if (startStep == 1 && HasSave)
+            {
+                var cont = MakeButton("▶ Continuar partida", () => { startOpen = false; OnContinue?.Invoke(); }, new Color(0.55f, 0.30f, 0.12f));
+                cont.style.marginTop = 12;
+                left.Add(cont);
+            }
             if (startStep == 2)
             {
                 var d = Para($"Dificultad: {DiffLabel(startDiff)}", 11, InkDark);

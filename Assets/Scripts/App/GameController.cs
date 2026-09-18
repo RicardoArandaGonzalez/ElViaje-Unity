@@ -38,6 +38,14 @@ namespace ElViaje.App
         public void NewGame(Difficulty difficulty = Difficulty.Medio, Starter starter = Starter.Heroe)
             => NewGame(Rng.MakeSeed(), difficulty, starter);
 
+        /// <summary>Carga una partida existente (desde guardado) y notifica a la UI.</summary>
+        public void LoadGame(GameState s)
+        {
+            if (s == null) return;
+            State = s;
+            StateChanged?.Invoke(State);
+        }
+
         /// <summary>
         /// Aplica una acción. Devuelve true si el estado avanzó (acción válida).
         /// Engine.ApplyMove devuelve el mismo objeto si la acción no era válida.

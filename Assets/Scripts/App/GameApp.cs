@@ -139,6 +139,13 @@ namespace ElViaje.App
                 ApplyMusic(controller.State);
                 view.Refresh();
             };
+
+            view.HasSave = SaveSystem.HasSave;
+            view.OnContinue = () =>
+            {
+                var g = SaveSystem.Load();
+                if (g != null) { selectedCardId = null; controller.LoadGame(g); }
+            };
         }
 
         void OnStateChanged(GameState s)
@@ -147,6 +154,10 @@ namespace ElViaje.App
             view.Render(s);
 
             ApplyMusic(s);
+
+            // Autoguardado: guarda mientras se juega; borra al terminar.
+            if (s.Status == GameStatus.Playing) SaveSystem.Save(s);
+            else SaveSystem.Clear();
 
             if (s.Status != GameStatus.Playing) return;
 
