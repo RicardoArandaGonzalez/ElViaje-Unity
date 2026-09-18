@@ -22,6 +22,11 @@ namespace ElViaje.App
 
         public string SelectedCardId;
 
+        // Estado local de la vista (no forma parte del GameState)
+        GameState current;
+        bool bookOpen;
+        string bookTab = "party";
+
         // Callbacks (los conecta GameApp)
         public Action<string> OnSelectCard;
         public Action<int, int> OnPlace;
@@ -124,6 +129,7 @@ namespace ElViaje.App
         // -------------------------------------------------------------------
         public void Render(GameState s)
         {
+            current = s;
             root.Clear();
             root.style.flexGrow = 1;
             root.style.backgroundColor = new StyleColor(Bg);
@@ -136,23 +142,29 @@ namespace ElViaje.App
             root.Add(TopBar(s));
 
             var go = Engine.CheckGameOver(s);
-            if (go.Over) { root.Add(EndPanel(s, go)); return; }
-
-            if (s.Phase == Phase.Combat && s.PendingCombat != null)
+            if (go.Over)
+            {
+                root.Add(EndPanel(s, go));
+            }
+            else if (s.Phase == Phase.Combat && s.PendingCombat != null)
             {
                 root.Add(CombatPanel(s));
-                return;
+            }
+            else
+            {
+                var scroll = new ScrollView(ScrollViewMode.VerticalAndHorizontal);
+                scroll.style.flexGrow = 1;
+                scroll.style.marginTop = 8;
+                scroll.style.marginBottom = 8;
+                scroll.Add(BoardGrid(s));
+                root.Add(scroll);
+                root.Add(ActionBar(s));
             }
 
-            var scroll = new ScrollView(ScrollViewMode.VerticalAndHorizontal);
-            scroll.style.flexGrow = 1;
-            scroll.style.marginTop = 8;
-            scroll.style.marginBottom = 8;
-            scroll.Add(BoardGrid(s));
-            root.Add(scroll);
-
-            root.Add(ActionBar(s));
+            if (bookOpen) root.Add(BookOverlay(s));
         }
+
+        void ReRender() { if (current != null) Render(current); }
 
         VisualElement TopBar(GameState s)
         {
@@ -176,6 +188,8 @@ namespace ElViaje.App
             bar.Add(MakeLabel($"Generales: {s.GeneralsDefeated}/4"));
             bar.Add(MakeLabel($"Mano: {s.Hand.Count}  Mazo: {s.Deck.Count}"));
 
+            var libro = MakeButton(bookOpen ? "📖 Cerrar" : "📖 Libro", () => { bookOpen = !bookOpen; ReRender(); });
+            bar.Add(libro);
             var nueva = MakeButton("Nueva partida", () => OnNewGame?.Invoke());
             bar.Add(nueva);
             return bar;
@@ -228,14 +242,13 @@ namespace ElViaje.App
                 box.style.justifyContent = Justify.Center;
                 box.style.alignItems = Align.Center;
 
-                var rect = CardSprites.GetSpriteRect(card.Kind, card.Region, card.Connections);
-                if (rect.HasValue)
+                if (ApplyCardArt(box, card.Kind, card.Region, card.Connections))
                 {
-                    CardSprites.ApplyTo(box, rect.Value);
+                    // arte aplicado
                 }
                 else
                 {
-                    // Sin arte (general / castillo / rey): caja de color + texto.
+                    // Sin arte (castillo / rey): caja de color + texto.
                     box.style.backgroundColor = new StyleColor(KindColor(card.Kind));
                     var arrows = new Label(Arrows(card.Connections));
                     arrows.style.color = new StyleColor(Ink);
@@ -319,6 +332,19 @@ namespace ElViaje.App
 
         static string Shorten(string s, int n) => s.Length <= n ? s : s.Substring(0, n - 1) + "…";
 
+        /// <summary>Aplica el arte de una carta a un elemento. true si había arte (false → castillo/rey).</summary>
+        static bool ApplyCardArt(VisualElement box, CardKind kind, Region? region, List<Dir> connections)
+        {
+            var rect = CardSprites.GetSpriteRect(kind, region, connections);
+            if (rect.HasValue) { CardSprites.ApplyTo(box, rect.Value); return true; }
+            if (kind == CardKind.General && region.HasValue)
+            {
+                CardSprites.ApplyImageCover(box, "general-" + Cards.RegionId(region.Value));
+                return true;
+            }
+            return false;
+        }
+
         // -------------------------------------------------------------------
         // Barra de acción según la fase
         // -------------------------------------------------------------------
@@ -360,11 +386,12 @@ namespace ElViaje.App
                 }
 
                 case Phase.Roll:
-                    bar.Add(MakeButton("🎲 Tirar el dado", () => OnRoll?.Invoke(), Highlight));
+                    bar.Add(MakeLabel("Tira el dado:"));
+                    bar.Add(DieButton());
                     break;
 
                 case Phase.Move:
-                    bar.Add(MakeLabel($"Movimiento restante: {s.MovesLeft}"));
+                    bar.Add(MakeLabel($"🎲 {s.LastRoll}  ·  Movimiento restante: {s.MovesLeft}"));
                     bar.Add(MakeButton("Terminar movimiento", () => OnEndMove?.Invoke()));
                     break;
 
@@ -405,9 +432,8 @@ namespace ElViaje.App
             var art = new VisualElement();
             art.style.width = 68;
             art.style.height = 64;
-            var rect = CardSprites.GetSpriteRect(card.Kind, card.Region, card.Connections);
-            if (rect.HasValue) CardSprites.ApplyTo(art, rect.Value);
-            else art.style.backgroundColor = new StyleColor(KindColor(card.Kind));
+            if (!ApplyCardArt(art, card.Kind, card.Region, card.Connections))
+                art.style.backgroundColor = new StyleColor(KindColor(card.Kind));
             b.Add(art);
 
             var label = new Label(isGeneral ? "⚔ Invocar" : Shorten(card.Name, 14));
@@ -418,6 +444,364 @@ namespace ElViaje.App
             label.style.unityTextAlign = TextAnchor.MiddleCenter;
             b.Add(label);
             return b;
+        }
+
+        // Botón-dado con la imagen del dado.
+        Button DieButton()
+        {
+            var b = new Button(() => OnRoll?.Invoke());
+            b.style.width = 64;
+            b.style.height = 64;
+            b.style.marginRight = 6;
+            b.style.marginTop = 2;
+            b.style.paddingLeft = 0;
+            b.style.paddingRight = 0;
+            b.style.paddingTop = 0;
+            b.style.paddingBottom = 0;
+            b.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
+            b.style.borderTopLeftRadius = 8;
+            b.style.borderTopRightRadius = 8;
+            b.style.borderBottomLeftRadius = 8;
+            b.style.borderBottomRightRadius = 8;
+            CardSprites.ApplyImageContain(b, "die");
+            return b;
+        }
+
+        // -------------------------------------------------------------------
+        // Libro de información (overlay con pestañas sobre la imagen del libro)
+        // -------------------------------------------------------------------
+        VisualElement BookOverlay(GameState s)
+        {
+            var overlay = new VisualElement();
+            overlay.style.position = Position.Absolute;
+            overlay.style.left = 0;
+            overlay.style.right = 0;
+            overlay.style.top = 0;
+            overlay.style.bottom = 0;
+            overlay.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0.6f));
+            overlay.style.justifyContent = Justify.Center;
+            overlay.style.alignItems = Align.Center;
+
+            var book = new VisualElement();
+            book.style.width = 760;
+            book.style.height = 507; // ~1536/1024
+            CardSprites.ApplyImageContain(book, "book-" + bookTab);
+            overlay.Add(book);
+
+            // Pestañas: banda a la derecha del libro (zonas clicables invisibles).
+            var tabs = new VisualElement();
+            tabs.style.position = Position.Absolute;
+            tabs.style.right = Length.Percent(2);
+            tabs.style.top = Length.Percent(16);
+            tabs.style.bottom = Length.Percent(35);
+            tabs.style.width = Length.Percent(18);
+            tabs.style.flexDirection = FlexDirection.Column;
+            foreach (var id in new[] { "party", "bonos", "generales", "historia" })
+            {
+                string tid = id;
+                var tb = new Button(() => { bookTab = tid; ReRender(); }) { text = "" };
+                tb.style.flexGrow = 1;
+                tb.style.marginTop = 0;
+                tb.style.marginBottom = 0;
+                tb.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
+                tb.style.borderTopWidth = 0;
+                tb.style.borderBottomWidth = 0;
+                tb.style.borderLeftWidth = 0;
+                tb.style.borderRightWidth = 0;
+                tb.style.borderTopLeftRadius = 0;
+                tb.style.borderTopRightRadius = 0;
+                tb.style.borderBottomLeftRadius = 0;
+                tb.style.borderBottomRightRadius = 0;
+                tabs.Add(tb);
+            }
+            book.Add(tabs);
+
+            // Página izquierda: título (y en Party, poder + descripción).
+            var leftPage = new VisualElement();
+            leftPage.style.position = Position.Absolute;
+            leftPage.style.left = Length.Percent(12);
+            leftPage.style.top = Length.Percent(15);
+            leftPage.style.right = Length.Percent(52);
+            leftPage.style.bottom = Length.Percent(22);
+            leftPage.Add(BookLeft(s, bookTab));
+            book.Add(leftPage);
+
+            // Página derecha: los datos (lista / registro).
+            var rightPage = new VisualElement();
+            rightPage.style.position = Position.Absolute;
+            rightPage.style.left = Length.Percent(50);
+            rightPage.style.top = Length.Percent(15);
+            rightPage.style.right = Length.Percent(23);
+            rightPage.style.bottom = Length.Percent(22);
+            rightPage.Add(BookRight(s, bookTab));
+            book.Add(rightPage);
+
+            var close = MakeButton("✕ Cerrar", () => { bookOpen = false; ReRender(); }, new Color(0.4f, 0.1f, 0.1f));
+            close.style.position = Position.Absolute;
+            close.style.top = 12;
+            close.style.right = 12;
+            overlay.Add(close);
+
+            return overlay;
+        }
+
+        static Color InkDark => new(0.20f, 0.12f, 0.05f);
+        static Color InkMuted => new(0.42f, 0.30f, 0.17f);
+
+        static string TitleFor(string tab) => tab switch
+        {
+            "party" => "PARTY",
+            "bonos" => "BONOS DE REGIÓN",
+            "generales" => "GENERALES",
+            "historia" => "HISTORIA",
+            _ => "",
+        };
+
+        Label BookTitle(string t)
+        {
+            var l = new Label(t);
+            l.style.color = new StyleColor(InkDark);
+            l.style.fontSize = 26;
+            l.style.unityFontStyleAndWeight = FontStyle.Bold;
+            l.style.unityTextAlign = TextAnchor.MiddleCenter;
+            l.style.whiteSpace = WhiteSpace.Normal;
+            l.style.letterSpacing = 3;
+            return l;
+        }
+
+        Label Para(string t, int size, Color color, bool center = true)
+        {
+            var l = new Label(t);
+            l.style.color = new StyleColor(color);
+            l.style.fontSize = size;
+            l.style.whiteSpace = WhiteSpace.Normal;
+            if (center) l.style.unityTextAlign = TextAnchor.MiddleCenter;
+            return l;
+        }
+
+        // Página izquierda: título centrado (y en Party, poder total + descripción).
+        VisualElement BookLeft(GameState s, string tab)
+        {
+            var col = new VisualElement();
+            col.style.flexGrow = 1;
+            col.style.justifyContent = Justify.Center;
+            col.style.alignItems = Align.Center;
+
+            col.Add(BookTitle(TitleFor(tab)));
+
+            if (tab == "party")
+            {
+                var power = new Label($"⚔ {Engine.GetPartyPower(s)}");
+                power.style.color = new StyleColor(InkDark);
+                power.style.fontSize = 26;
+                power.style.unityFontStyleAndWeight = FontStyle.Bold;
+                power.style.marginTop = 6;
+                col.Add(power);
+
+                var cap = Para("Poder total del Party", 10, InkMuted);
+                cap.style.marginBottom = 10;
+                col.Add(cap);
+
+                foreach (var frase in new[]
+                {
+                    "Coloca las cartas de tu mano sobre la mesa",
+                    "para crear tu camino del héroe.",
+                    "Visita pueblos, recluta otros héroes",
+                    "y derrota al Rey Demonio.",
+                })
+                {
+                    var f = Para(frase, 10, InkMuted);
+                    f.style.marginBottom = 0;
+                    col.Add(f);
+                }
+            }
+            else if (tab == "generales")
+            {
+                var count = new Label($"{s.GeneralsDefeated} / 4");
+                count.style.color = new StyleColor(InkDark);
+                count.style.fontSize = 32;
+                count.style.unityFontStyleAndWeight = FontStyle.Bold;
+                count.style.marginTop = 8;
+                col.Add(count);
+                col.Add(DiamondDiagram());
+            }
+            return col;
+        }
+
+        // Diagrama de rombo: distancia Manhattan al Corazón (♥ en el centro).
+        VisualElement DiamondDiagram()
+        {
+            var wrap = new VisualElement();
+            wrap.style.marginTop = 12;
+            wrap.style.alignItems = Align.Center;
+            for (int r = -2; r <= 2; r++)
+            {
+                var row = new VisualElement();
+                row.style.flexDirection = FlexDirection.Row;
+                for (int c = -2; c <= 2; c++)
+                {
+                    bool center = r == 0 && c == 0;
+                    var cell = new Label(center ? "♥" : (Mathf.Abs(r) + Mathf.Abs(c)).ToString());
+                    cell.style.width = 20;
+                    cell.style.fontSize = 15;
+                    cell.style.unityTextAlign = TextAnchor.MiddleCenter;
+                    cell.style.color = new StyleColor(center ? new Color(0.72f, 0.15f, 0.15f) : InkMuted);
+                    row.Add(cell);
+                }
+                wrap.Add(row);
+            }
+            return wrap;
+        }
+
+        static Color TierColor(CombatTier t) => t switch
+        {
+            CombatTier.Low => new Color(0.72f, 0.20f, 0.20f),
+            CombatTier.Mid => new Color(0.72f, 0.50f, 0.12f),
+            CombatTier.High => new Color(0.25f, 0.50f, 0.22f),
+            _ => InkDark,
+        };
+
+        static Color RegionColor(Region r) => r switch
+        {
+            Region.Bosque => new Color(0.30f, 0.50f, 0.25f),
+            Region.Planicies => new Color(0.80f, 0.68f, 0.30f),
+            Region.Montanas => new Color(0.52f, 0.56f, 0.66f),
+            Region.Volcan => new Color(0.72f, 0.30f, 0.20f),
+            _ => InkMuted,
+        };
+
+        // Fila de bono: punto de color + región + valor (destacado si > 0).
+        VisualElement BonusRow(Region region, int bonus)
+        {
+            var row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems = Align.Center;
+            row.style.paddingTop = 4;
+            row.style.paddingBottom = 4;
+            row.style.borderBottomWidth = 1;
+            row.style.borderBottomColor = new StyleColor(new Color(0.3f, 0.2f, 0.1f, 0.30f));
+
+            var dot = new VisualElement();
+            dot.style.width = 11;
+            dot.style.height = 11;
+            dot.style.marginRight = 7;
+            dot.style.borderTopLeftRadius = 6;
+            dot.style.borderTopRightRadius = 6;
+            dot.style.borderBottomLeftRadius = 6;
+            dot.style.borderBottomRightRadius = 6;
+            dot.style.backgroundColor = new StyleColor(RegionColor(region));
+            row.Add(dot);
+
+            var n = new Label(Cards.RegionLabel(region));
+            n.style.color = new StyleColor(bonus > 0 ? InkDark : InkMuted);
+            n.style.fontSize = 13;
+            n.style.flexGrow = 1;
+            row.Add(n);
+
+            var v = new Label("+" + bonus);
+            v.style.color = new StyleColor(bonus > 0 ? InkDark : InkMuted);
+            v.style.fontSize = 13;
+            if (bonus > 0) v.style.unityFontStyleAndWeight = FontStyle.Bold;
+            row.Add(v);
+            return row;
+        }
+
+        // Página derecha: los datos de la pestaña.
+        VisualElement BookRight(GameState s, string tab)
+        {
+            var col = new ScrollView();
+            col.style.flexGrow = 1;
+
+            switch (tab)
+            {
+                case "party":
+                    foreach (var m in s.Party.Members)
+                    {
+                        int bonus = m.Region.HasValue ? s.VillageBonus[m.Region.Value] : 0;
+                        col.Add(DataRow(m.Name, (m.BasePower + bonus).ToString()));
+                    }
+                    break;
+
+                case "bonos":
+                    foreach (var region in Cards.Regions)
+                        col.Add(BonusRow(region, s.VillageBonus[region]));
+                    var bfoot = Para("Los Pueblos otorgan +1 o +2 Poder a los Héroes de su región (§22).", 10, InkMuted, center: false);
+                    bfoot.style.marginTop = 8;
+                    col.Add(bfoot);
+                    break;
+
+                case "generales":
+                {
+                    int party = Engine.GetPartyPower(s);
+                    int next = Math.Min(s.GeneralsDefeated, Cards.GeneralPowers.Length - 1);
+                    for (int i = 0; i < Cards.GeneralPowers.Length; i++)
+                    {
+                        int p = Cards.GeneralPowers[i];
+                        var fc = Engine.CombatForecastFor(party, p, false);
+
+                        var block = new VisualElement();
+                        block.style.paddingTop = 2;
+                        block.style.paddingBottom = 2;
+                        block.style.borderBottomWidth = 1;
+                        block.style.borderBottomColor = new StyleColor(new Color(0.3f, 0.2f, 0.1f, 0.30f));
+
+                        var t = new Label($"General {i + 1} · Poder {p}");
+                        t.style.color = new StyleColor(InkDark);
+                        t.style.fontSize = 11;
+                        t.style.unityFontStyleAndWeight = FontStyle.Bold;
+                        block.Add(t);
+
+                        string prox = i == next ? "Próximo · " : "";
+                        var sub = new Label($"{prox}● {fc.Label} · {fc.Attempts} intentos");
+                        sub.style.color = new StyleColor(TierColor(fc.Tier));
+                        sub.style.fontSize = 9;
+                        sub.style.whiteSpace = WhiteSpace.Normal;
+                        block.Add(sub);
+
+                        col.Add(block);
+                    }
+                    var gfoot = Para("Iguala o supera su Poder para tener más intentos.", 9, InkMuted, center: false);
+                    gfoot.style.marginTop = 4;
+                    col.Add(gfoot);
+                    break;
+                }
+
+                case "historia":
+                    int start = Math.Max(0, s.Log.Count - 16);
+                    for (int i = start; i < s.Log.Count; i++)
+                    {
+                        var l = Para("• " + s.Log[i].Text, 10, InkDark, center: false);
+                        l.style.marginBottom = 4;
+                        col.Add(l);
+                    }
+                    break;
+            }
+            return col;
+        }
+
+        // Fila "nombre .......... valor" con línea inferior tenue.
+        VisualElement DataRow(string name, string value)
+        {
+            var row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.alignItems = Align.Center;
+            row.style.paddingTop = 4;
+            row.style.paddingBottom = 4;
+            row.style.borderBottomWidth = 1;
+            row.style.borderBottomColor = new StyleColor(new Color(0.3f, 0.2f, 0.1f, 0.30f));
+
+            var n = new Label(name);
+            n.style.color = new StyleColor(InkDark);
+            n.style.fontSize = 13;
+            n.style.flexGrow = 1;
+            row.Add(n);
+
+            var v = new Label(value);
+            v.style.color = new StyleColor(InkDark);
+            v.style.fontSize = 13;
+            v.style.unityFontStyleAndWeight = FontStyle.Bold;
+            row.Add(v);
+            return row;
         }
 
         // -------------------------------------------------------------------

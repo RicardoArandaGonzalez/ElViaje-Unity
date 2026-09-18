@@ -129,6 +129,16 @@ namespace ElViaje.App
             return t;
         }
 
+        // Imágenes sueltas (dado, libros) por nombre de archivo.
+        static readonly Dictionary<string, Texture2D> imgCache = new();
+        public static Texture2D Image(string name)
+        {
+            if (imgCache.TryGetValue(name, out var t) && t != null) return t;
+            t = Load(name);
+            imgCache[name] = t;
+            return t;
+        }
+
         // -------------------------------------------------------------------
         // Aplicar como fondo
         // -------------------------------------------------------------------
@@ -155,12 +165,20 @@ namespace ElViaje.App
         /// <summary>Fondo con la imagen del General/Rey de la región, cubriendo el elemento.</summary>
         public static void ApplyBoss(VisualElement ve, Region region) => ApplyCover(ve, Boss(region));
 
-        static void ApplyCover(VisualElement ve, Texture2D tex)
+        static void ApplyCover(VisualElement ve, Texture2D tex) => ApplyFit(ve, tex, BackgroundSizeType.Cover);
+
+        /// <summary>Fondo con una imagen suelta, mostrada completa (contain) y centrada.</summary>
+        public static void ApplyImageContain(VisualElement ve, string name) => ApplyFit(ve, Image(name), BackgroundSizeType.Contain);
+
+        /// <summary>Fondo con una imagen suelta, cubriendo el elemento (cover) y centrada.</summary>
+        public static void ApplyImageCover(VisualElement ve, string name) => ApplyFit(ve, Image(name), BackgroundSizeType.Cover);
+
+        static void ApplyFit(VisualElement ve, Texture2D tex, BackgroundSizeType fit)
         {
             if (tex == null) return;
             ve.style.backgroundImage = new StyleBackground(tex);
             ve.style.backgroundRepeat = new StyleBackgroundRepeat(new BackgroundRepeat(Repeat.NoRepeat, Repeat.NoRepeat));
-            ve.style.backgroundSize = new StyleBackgroundSize(new BackgroundSize(BackgroundSizeType.Cover));
+            ve.style.backgroundSize = new StyleBackgroundSize(new BackgroundSize(fit));
             ve.style.backgroundPositionX = new StyleBackgroundPosition(new BackgroundPosition(BackgroundPositionKeyword.Center));
             ve.style.backgroundPositionY = new StyleBackgroundPosition(new BackgroundPosition(BackgroundPositionKeyword.Center));
         }
