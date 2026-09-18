@@ -40,12 +40,8 @@ namespace ElViaje.App
 
             controller.StateChanged += OnStateChanged;
 
-            if (!controller.HasGame)
-            {
-                if (seed == 0) controller.NewGame(difficulty, starter);
-                else controller.NewGame(seed, difficulty, starter);
-            }
-            else OnStateChanged(controller.State);
+            if (controller.HasGame) OnStateChanged(controller.State);
+            else view.OpenStart(); // arranca en la pantalla de inicio
         }
 
         void OnDisable()
@@ -55,11 +51,13 @@ namespace ElViaje.App
 
         void WireCallbacks()
         {
-            view.OnNewGame = () =>
+            view.OnNewGame = () => { selectedCardId = null; view.OpenStart(); };
+
+            view.OnStartGame = (diff, st) =>
             {
                 selectedCardId = null;
-                if (seed == 0) controller.NewGame(difficulty, starter);
-                else controller.NewGame(seed, difficulty, starter);
+                if (seed == 0) controller.NewGame(diff, st);
+                else controller.NewGame(seed, diff, st);
             };
 
             view.OnSelectCard = id =>

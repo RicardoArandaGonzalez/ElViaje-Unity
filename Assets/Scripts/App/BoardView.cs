@@ -26,6 +26,9 @@ namespace ElViaje.App
         GameState current;
         bool bookOpen;
         string bookTab = "party";
+        bool startOpen;
+        int startStep = 1;
+        Difficulty startDiff = Difficulty.Medio;
 
         // Callbacks (los conecta GameApp)
         public Action<string> OnSelectCard;
@@ -35,6 +38,7 @@ namespace ElViaje.App
         public Action<string> OnDiscard;
         public Action<int, int> OnCombatSelect;
         public Action OnCombatRetreat;
+        public Action<Difficulty, Starter> OnStartGame;
 
         public BoardView(VisualElement root, GameController controller)
         {
@@ -162,9 +166,23 @@ namespace ElViaje.App
             }
 
             if (bookOpen) root.Add(BookOverlay(s));
+            if (startOpen) root.Add(StartOverlay());
         }
 
         void ReRender() { if (current != null) Render(current); }
+
+        // --- Pantalla de inicio ---
+        public void OpenStart() { startOpen = true; startStep = 1; RefreshStart(); }
+
+        void RefreshStart()
+        {
+            if (current != null) { Render(current); return; }
+            root.Clear();
+            root.style.flexGrow = 1;
+            root.style.backgroundColor = new StyleColor(Bg);
+            CardSprites.ApplyMesa(root);
+            root.Add(StartOverlay());
+        }
 
         VisualElement TopBar(GameState s)
         {
@@ -465,6 +483,157 @@ namespace ElViaje.App
             b.style.borderBottomRightRadius = 8;
             CardSprites.ApplyImageContain(b, "die");
             return b;
+        }
+
+        static string DiffLabel(Difficulty d) => d switch
+        {
+            Difficulty.Facil => "Fácil", Difficulty.Medio => "Medio", Difficulty.Dificil => "Difícil", _ => "",
+        };
+        static string DiffDesc(Difficulty d) => d switch
+        {
+            Difficulty.Facil => "Mano 4 · Rey 14", Difficulty.Medio => "Mano 3 · Rey 16", Difficulty.Dificil => "Mano 3 · Rey 20", _ => "",
+        };
+
+        Button TextButton(string t, Action onClick)
+        {
+            var b = new Button(() => onClick()) { text = t };
+            b.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
+            b.style.color = new StyleColor(InkMuted);
+            b.style.fontSize = 10;
+            b.style.marginTop = 6;
+            b.style.paddingTop = 2;
+            b.style.paddingBottom = 2;
+            b.style.borderTopWidth = 0;
+            b.style.borderBottomWidth = 0;
+            b.style.borderLeftWidth = 0;
+            b.style.borderRightWidth = 0;
+            return b;
+        }
+
+        // Botón de elección (dificultad / héroe): título a la izq, detalle a la der.
+        Button StartChoice(string title, string sub, bool selected, Action onClick)
+        {
+            var b = new Button(() => onClick());
+            b.style.flexDirection = FlexDirection.Row;
+            b.style.justifyContent = Justify.SpaceBetween;
+            b.style.alignItems = Align.Center;
+            b.style.width = 220;
+            b.style.marginTop = 5;
+            b.style.paddingLeft = 10;
+            b.style.paddingRight = 10;
+            b.style.paddingTop = 6;
+            b.style.paddingBottom = 6;
+            b.style.backgroundColor = new StyleColor(selected ? new Color(0.85f, 0.55f, 0.2f, 0.35f) : new Color(0, 0, 0, 0.06f));
+            b.style.borderTopWidth = 2;
+            b.style.borderBottomWidth = 2;
+            b.style.borderLeftWidth = 2;
+            b.style.borderRightWidth = 2;
+            SetBorderColor(b, selected ? Highlight : new Color(0, 0, 0, 0));
+            b.style.borderTopLeftRadius = 6;
+            b.style.borderTopRightRadius = 6;
+            b.style.borderBottomLeftRadius = 6;
+            b.style.borderBottomRightRadius = 6;
+
+            var n = new Label(title);
+            n.style.color = new StyleColor(InkDark);
+            n.style.fontSize = 13;
+            n.style.unityFontStyleAndWeight = FontStyle.Bold;
+            b.Add(n);
+            var d = new Label(sub);
+            d.style.color = new StyleColor(InkMuted);
+            d.style.fontSize = 10;
+            b.Add(d);
+            return b;
+        }
+
+        // -------------------------------------------------------------------
+        // Pantalla de inicio (libro abierto: dificultad → elección de héroe)
+        // -------------------------------------------------------------------
+        VisualElement StartOverlay()
+        {
+            var overlay = new VisualElement();
+            overlay.style.position = Position.Absolute;
+            overlay.style.left = 0;
+            overlay.style.right = 0;
+            overlay.style.top = 0;
+            overlay.style.bottom = 0;
+            overlay.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0.6f));
+            overlay.style.justifyContent = Justify.Center;
+            overlay.style.alignItems = Align.Center;
+
+            var book = new VisualElement();
+            book.style.width = 840;
+            book.style.height = 560;
+            CardSprites.ApplyImageContain(book, "book-open-plain");
+            overlay.Add(book);
+
+            var pages = new VisualElement();
+            pages.style.position = Position.Absolute;
+            pages.style.left = Length.Percent(11);
+            pages.style.top = Length.Percent(13);
+            pages.style.right = Length.Percent(12);
+            pages.style.bottom = Length.Percent(30);
+            pages.style.flexDirection = FlexDirection.Row;
+            book.Add(pages);
+
+            var left = new VisualElement();
+            left.style.flexGrow = 1;
+            left.style.justifyContent = Justify.Center;
+            left.style.alignItems = Align.Center;
+            pages.Add(left);
+
+            var right = new VisualElement();
+            right.style.flexGrow = 1;
+            right.style.justifyContent = Justify.Center;
+            right.style.alignItems = Align.Center;
+            pages.Add(right);
+
+            // Página izquierda: título.
+            var title = new Label("El Viaje del Héroe");
+            title.style.color = new StyleColor(InkDark);
+            title.style.fontSize = 22;
+            title.style.unityFontStyleAndWeight = FontStyle.Bold;
+            title.style.unityTextAlign = TextAnchor.MiddleCenter;
+            title.style.whiteSpace = WhiteSpace.Normal;
+            left.Add(title);
+            left.Add(Para("Reglamento v2.1 Beta · Aventura solitario", 10, InkMuted));
+            if (startStep == 2)
+            {
+                var d = Para($"Dificultad: {DiffLabel(startDiff)}", 11, InkDark);
+                d.style.marginTop = 12;
+                left.Add(d);
+                left.Add(TextButton("← Cambiar dificultad", () => { startStep = 1; RefreshStart(); }));
+            }
+
+            // Página derecha: paso 1 (dificultad) o paso 2 (héroe).
+            if (startStep == 1)
+            {
+                var h = Para("Dificultad", 14, InkDark);
+                h.style.unityFontStyleAndWeight = FontStyle.Bold;
+                h.style.marginBottom = 4;
+                right.Add(h);
+                foreach (var diff in new[] { Difficulty.Facil, Difficulty.Medio, Difficulty.Dificil })
+                {
+                    var dd = diff;
+                    right.Add(StartChoice(DiffLabel(dd), DiffDesc(dd), startDiff == dd, () => { startDiff = dd; RefreshStart(); }));
+                }
+                var go = MakeButton("Comenzar aventura →", () => { startStep = 2; RefreshStart(); });
+                go.style.marginTop = 12;
+                right.Add(go);
+            }
+            else
+            {
+                var h = Para("Elige el líder del Party", 14, InkDark);
+                h.style.unityFontStyleAndWeight = FontStyle.Bold;
+                h.style.marginBottom = 4;
+                right.Add(h);
+                right.Add(StartChoice("Caballero", "Poder base 3", false,
+                    () => { startOpen = false; OnStartGame?.Invoke(startDiff, Starter.Heroe); }));
+                right.Add(StartChoice("Mago", "Movilidad +1 (1d6 + 1)", false,
+                    () => { startOpen = false; OnStartGame?.Invoke(startDiff, Starter.Heroina); }));
+            }
+
+            return overlay;
         }
 
         // -------------------------------------------------------------------
