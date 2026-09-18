@@ -127,6 +127,7 @@ namespace ElViaje.App
             root.Clear();
             root.style.flexGrow = 1;
             root.style.backgroundColor = new StyleColor(Bg);
+            CardSprites.ApplyMesa(root); // mesa de madera de fondo
             root.style.paddingLeft = 12;
             root.style.paddingRight = 12;
             root.style.paddingTop = 10;
@@ -224,28 +225,43 @@ namespace ElViaje.App
             {
                 var box = new VisualElement();
                 Size(box);
-                box.style.backgroundColor = new StyleColor(KindColor(card.Kind));
                 box.style.justifyContent = Justify.Center;
                 box.style.alignItems = Align.Center;
-                if (isParty) { box.style.borderTopWidth = 3; box.style.borderBottomWidth = 3; box.style.borderLeftWidth = 3; box.style.borderRightWidth = 3; SetBorderColor(box, Highlight); }
 
-                var arrows = new Label(Arrows(card.Connections)) { };
-                arrows.style.color = new StyleColor(Ink);
-                arrows.style.fontSize = 14;
-                box.Add(arrows);
-
-                var name = new Label(Shorten(card.Name, 12));
-                name.style.color = new StyleColor(Ink);
-                name.style.fontSize = 8;
-                name.style.whiteSpace = WhiteSpace.Normal;
-                name.style.unityTextAlign = TextAnchor.MiddleCenter;
-                box.Add(name);
+                var rect = CardSprites.GetSpriteRect(card.Kind, card.Region, card.Connections);
+                if (rect.HasValue)
+                {
+                    CardSprites.ApplyTo(box, rect.Value);
+                }
+                else
+                {
+                    // Sin arte (general / castillo / rey): caja de color + texto.
+                    box.style.backgroundColor = new StyleColor(KindColor(card.Kind));
+                    var arrows = new Label(Arrows(card.Connections));
+                    arrows.style.color = new StyleColor(Ink);
+                    arrows.style.fontSize = 14;
+                    box.Add(arrows);
+                    var name = new Label(Shorten(card.Name, 12));
+                    name.style.color = new StyleColor(Ink);
+                    name.style.fontSize = 8;
+                    name.style.whiteSpace = WhiteSpace.Normal;
+                    name.style.unityTextAlign = TextAnchor.MiddleCenter;
+                    box.Add(name);
+                }
 
                 if (isParty)
                 {
+                    box.style.borderTopWidth = 3;
+                    box.style.borderBottomWidth = 3;
+                    box.style.borderLeftWidth = 3;
+                    box.style.borderRightWidth = 3;
+                    SetBorderColor(box, Highlight);
                     var hero = new Label("★");
                     hero.style.color = new StyleColor(Highlight);
-                    hero.style.fontSize = 12;
+                    hero.style.fontSize = 14;
+                    hero.style.position = Position.Absolute;
+                    hero.style.bottom = 0;
+                    hero.style.right = 2;
                     box.Add(hero);
                 }
                 return box;
@@ -330,17 +346,7 @@ namespace ElViaje.App
                     var legal = controller.LegalMoves();
                     bool canDiscard = legal.Exists(m => m.Type == ActionType.Discard);
                     foreach (var id in s.Hand)
-                    {
-                        var card = Cards.GetCard(id);
-                        if (card.Kind == CardKind.General)
-                        {
-                            bar.Add(MakeButton($"⚔ Invocar {Shorten(card.Name, 16)}", () => OnInvokeGeneral?.Invoke(), KindColor(CardKind.General)));
-                            continue;
-                        }
-                        bool sel = id == SelectedCardId;
-                        bar.Add(MakeButton((sel ? "▶ " : "") + Shorten(card.Name, 16),
-                            () => OnSelectCard?.Invoke(id), sel ? Highlight : Panel));
-                    }
+                        bar.Add(HandCard(id));
                     if (canDiscard)
                     {
                         bar.Add(MakeLabel("· Sin jugada legal, descarta:"));
@@ -369,24 +375,104 @@ namespace ElViaje.App
             return bar;
         }
 
+        // Mini-carta de la mano: sprite + nombre, clicable. Los Generales invocan.
+        VisualElement HandCard(string id)
+        {
+            var card = Cards.GetCard(id);
+            bool isGeneral = card.Kind == CardKind.General;
+            bool sel = id == SelectedCardId;
+
+            var b = new Button(() =>
+            {
+                if (isGeneral) OnInvokeGeneral?.Invoke();
+                else OnSelectCard?.Invoke(id);
+            });
+            b.style.width = 78;
+            b.style.height = 106;
+            b.style.marginRight = 6;
+            b.style.marginTop = 4;
+            b.style.paddingLeft = 3;
+            b.style.paddingRight = 3;
+            b.style.paddingTop = 3;
+            b.style.paddingBottom = 3;
+            b.style.alignItems = Align.Center;
+            b.style.backgroundColor = new StyleColor(sel ? Highlight : Panel);
+            b.style.borderTopLeftRadius = 6;
+            b.style.borderTopRightRadius = 6;
+            b.style.borderBottomLeftRadius = 6;
+            b.style.borderBottomRightRadius = 6;
+
+            var art = new VisualElement();
+            art.style.width = 68;
+            art.style.height = 64;
+            var rect = CardSprites.GetSpriteRect(card.Kind, card.Region, card.Connections);
+            if (rect.HasValue) CardSprites.ApplyTo(art, rect.Value);
+            else art.style.backgroundColor = new StyleColor(KindColor(card.Kind));
+            b.Add(art);
+
+            var label = new Label(isGeneral ? "⚔ Invocar" : Shorten(card.Name, 14));
+            label.style.color = new StyleColor(sel ? Bg : Ink);
+            label.style.fontSize = 8;
+            label.style.marginTop = 2;
+            label.style.whiteSpace = WhiteSpace.Normal;
+            label.style.unityTextAlign = TextAnchor.MiddleCenter;
+            b.Add(label);
+            return b;
+        }
+
         // -------------------------------------------------------------------
         // Combate (minijuego de búsqueda del Corazón)
         // -------------------------------------------------------------------
         VisualElement CombatPanel(GameState s)
         {
             var pc = s.PendingCombat;
+
+            // Panel a pantalla completa con la imagen del jefe de fondo.
             var panel = new VisualElement();
-            panel.style.marginTop = 10;
+            panel.style.flexGrow = 1;
+            panel.style.marginTop = 8;
+            panel.style.overflow = Overflow.Hidden;
+            panel.style.borderTopLeftRadius = 10;
+            panel.style.borderTopRightRadius = 10;
+            panel.style.borderBottomLeftRadius = 10;
+            panel.style.borderBottomRightRadius = 10;
+            CardSprites.ApplyBoss(panel, pc.Region);
+
+            // Velo oscuro para legibilidad sobre el arte.
+            var scrim = new VisualElement();
+            scrim.style.flexGrow = 1;
+            scrim.style.backgroundColor = new StyleColor(new Color(0f, 0f, 0f, 0.45f));
+            scrim.style.alignItems = Align.Center;
+            scrim.style.paddingTop = 14;
+            scrim.style.paddingBottom = 14;
+            scrim.style.paddingLeft = 12;
+            scrim.style.paddingRight = 12;
+            panel.Add(scrim);
 
             string title = pc.IsRey ? "¡El Rey Demonio!" : $"¡{Cards.GetCard(pc.CardId).Name}!";
-            var h = MakeLabel(title, 18, Highlight);
-            h.style.marginBottom = 6;
-            panel.Add(h);
+            var h = MakeLabel(title, 24, Highlight);
+            h.style.marginRight = 0;
+            h.style.marginBottom = 4;
+            h.style.unityFontStyleAndWeight = FontStyle.Bold;
+            h.style.unityTextAlign = TextAnchor.MiddleCenter;
+            scrim.Add(h);
 
-            panel.Add(MakeLabel(
-                $"Intentos: {pc.AttemptsUsed}/{pc.AttemptsTotal}   " +
-                $"Poder {(pc.IsRey ? "Rey" : "General")}: {pc.GeneralPower}   Party: {pc.PartyPower}" +
-                (pc.IsRey ? $"   Corazones: {pc.HeartsFound}/{pc.HeartsTotal}" : "")));
+            var info = MakeLabel(
+                $"Intentos: {pc.AttemptsUsed}/{pc.AttemptsTotal}    " +
+                $"Poder {(pc.IsRey ? "Rey" : "General")}: {pc.GeneralPower}    Party: {pc.PartyPower}" +
+                (pc.IsRey ? $"    Corazones: {pc.HeartsFound}/{pc.HeartsTotal}" : ""), 12);
+            info.style.marginRight = 0;
+            info.style.unityTextAlign = TextAnchor.MiddleCenter;
+            scrim.Add(info);
+
+            // Antes del primer clic se puede retirar; después no.
+            if (!pc.Started)
+            {
+                var retreat = MakeButton("🏃 Retirarse", () => OnCombatRetreat?.Invoke());
+                retreat.style.marginTop = 6;
+                retreat.style.marginBottom = 4;
+                scrim.Add(retreat);
+            }
 
             var reveal = new Dictionary<string, int>();
             foreach (var v in pc.Revealed) reveal[$"{v.R},{v.C}"] = v.Dist;
@@ -404,7 +490,8 @@ namespace ElViaje.App
                     {
                         var cellEl = new VisualElement();
                         CombatSize(cellEl);
-                        cellEl.style.backgroundColor = new StyleColor(DistColor(dist, pc.GridN));
+                        var dc = DistColor(dist, pc.GridN);
+                        cellEl.style.backgroundColor = new StyleColor(new Color(dc.r, dc.g, dc.b, 0.85f));
                         cellEl.style.justifyContent = Justify.Center;
                         cellEl.style.alignItems = Align.Center;
                         var lbl = new Label(dist.ToString());
@@ -418,20 +505,14 @@ namespace ElViaje.App
                         int rr = r, cc = c;
                         var b = new Button(() => OnCombatSelect?.Invoke(rr, cc)) { text = "" };
                         CombatSize(b);
-                        b.style.backgroundColor = new StyleColor(new Color(0.22f, 0.20f, 0.24f));
+                        b.style.backgroundColor = new StyleColor(new Color(0.1f, 0.09f, 0.12f, 0.5f));
                         rowEl.Add(b);
                     }
                 }
                 gridCol.Add(rowEl);
             }
-            panel.Add(gridCol);
+            scrim.Add(gridCol);
 
-            if (!pc.Started)
-            {
-                var retreat = MakeButton("🏃 Retirarse", () => OnCombatRetreat?.Invoke());
-                retreat.style.marginTop = 8;
-                panel.Add(retreat);
-            }
             return panel;
         }
 
