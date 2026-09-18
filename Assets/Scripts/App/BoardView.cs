@@ -39,6 +39,7 @@ namespace ElViaje.App
         VisualElement viewport, content;
         bool dragging;
         Vector2 dragStart, offsetStart;
+        bool geomHooked, lastPortrait;
 
         // Callbacks (los conecta GameApp)
         public Action<string> OnSelectCard;
@@ -170,44 +171,40 @@ namespace ElViaje.App
             }
             else
             {
-                // Zona principal: tablero (izquierda) + columna flotante (derecha).
-                var main = new VisualElement();
-                main.style.flexDirection = FlexDirection.Row;
-                main.style.flexGrow = 1;
-                main.style.marginTop = 2;
-
-                // Viewport con recorte; el contenido se traslada/escala (pan + zoom).
-                viewport = new VisualElement();
-                viewport.style.flexGrow = 1;
-                viewport.style.overflow = Overflow.Hidden;
-                viewport.style.position = Position.Relative;
-
-                content = new VisualElement();
-                content.style.position = Position.Absolute;
-                content.Add(BoardGrid(s));
-                viewport.Add(content);
-
-                viewport.RegisterCallback<PointerDownEvent>(e =>
+                // Re-dibuja al cambiar de orientación (retrato ↔ apaisado).
+                if (!geomHooked)
                 {
-                    dragging = true;
-                    dragStart = new Vector2(e.position.x, e.position.y);
-                    offsetStart = boardOffset;
-                });
-                viewport.RegisterCallback<PointerMoveEvent>(e =>
+                    geomHooked = true;
+                    root.RegisterCallback<GeometryChangedEvent>(_ =>
+                    {
+                        bool p = IsPortrait();
+                        if (p != lastPortrait) { lastPortrait = p; ReRender(); }
+                    });
+                }
+                bool portrait = IsPortrait();
+                lastPortrait = portrait;
+
+                BuildViewport(s);
+
+                if (portrait)
                 {
-                    if (!dragging) return;
-                    var d = new Vector2(e.position.x, e.position.y) - dragStart;
-                    boardOffset = offsetStart + d;
-                    ApplyBoardTransform();
-                });
-                viewport.RegisterCallback<PointerUpEvent>(_ => dragging = false);
-                viewport.RegisterCallback<PointerLeaveEvent>(_ => dragging = false);
-
-                main.Add(viewport);
-                main.Add(SideColumn(s));
-                root.Add(main);
-
-                root.Add(HandBar(s)); // mano en abanico, siempre visible
+                    // Teléfono vertical: tablero arriba, controles y mano debajo.
+                    root.Add(viewport);
+                    root.Add(Controls(s, row: true));
+                    root.Add(HandBar(s));
+                }
+                else
+                {
+                    // Apaisado: tablero + columna lateral, mano abajo.
+                    var main = new VisualElement();
+                    main.style.flexDirection = FlexDirection.Row;
+                    main.style.flexGrow = 1;
+                    main.style.marginTop = 2;
+                    main.Add(viewport);
+                    main.Add(Controls(s, row: false));
+                    root.Add(main);
+                    root.Add(HandBar(s));
+                }
 
                 ApplyBoardTransform();
                 if (!boardInit)
@@ -325,6 +322,8 @@ namespace ElViaje.App
         {
             string key = Geometry.Key(x, y);
             bool isParty = s.Party.X == x && s.Party.Y == y;
+            bool isStep = steps.Exists(t => t.x == x && t.y == y);
+            bool isPlacement = placements.Exists(p => p.X == x && p.Y == y);
 
             if (s.Grid.TryGetValue(key, out var card))
             {
@@ -368,11 +367,23 @@ namespace ElViaje.App
                     hero.style.right = 2;
                     box.Add(hero);
                 }
+                else if (isStep)
+                {
+                    // Casilla del camino a la que el Party puede moverse: clicable.
+                    box.style.borderTopWidth = 3;
+                    box.style.borderBottomWidth = 3;
+                    box.style.borderLeftWidth = 3;
+                    box.style.borderRightWidth = 3;
+                    SetBorderColor(box, Step);
+                    var mark = new Label("»");
+                    mark.style.color = new StyleColor(Color.white);
+                    mark.style.fontSize = 22;
+                    mark.style.unityFontStyleAndWeight = FontStyle.Bold;
+                    box.Add(mark);
+                    box.RegisterCallback<ClickEvent>(_ => OnStep?.Invoke(x, y));
+                }
                 return box;
             }
-
-            bool isPlacement = placements.Exists(p => p.X == x && p.Y == y);
-            bool isStep = steps.Exists(t => t.x == x && t.y == y);
 
             if (isPlacement)
             {
@@ -469,6 +480,44 @@ namespace ElViaje.App
             return b;
         }
 
+        bool IsPortrait()
+        {
+            float w = root.resolvedStyle.width;
+            float h = root.resolvedStyle.height;
+            if (w <= 1f || float.IsNaN(w)) return false; // por defecto apaisado hasta conocer el tamaño
+            return h > w;
+        }
+
+        // Viewport con recorte; el contenido se traslada/escala (pan + zoom).
+        void BuildViewport(GameState s)
+        {
+            viewport = new VisualElement();
+            viewport.style.flexGrow = 1;
+            viewport.style.overflow = Overflow.Hidden;
+            viewport.style.position = Position.Relative;
+
+            content = new VisualElement();
+            content.style.position = Position.Absolute;
+            content.Add(BoardGrid(s));
+            viewport.Add(content);
+
+            viewport.RegisterCallback<PointerDownEvent>(e =>
+            {
+                dragging = true;
+                dragStart = new Vector2(e.position.x, e.position.y);
+                offsetStart = boardOffset;
+            });
+            viewport.RegisterCallback<PointerMoveEvent>(e =>
+            {
+                if (!dragging) return;
+                var d = new Vector2(e.position.x, e.position.y) - dragStart;
+                boardOffset = offsetStart + d;
+                ApplyBoardTransform();
+            });
+            viewport.RegisterCallback<PointerUpEvent>(_ => dragging = false);
+            viewport.RegisterCallback<PointerLeaveEvent>(_ => dragging = false);
+        }
+
         void ApplyBoardTransform()
         {
             if (content == null) return;
@@ -509,51 +558,61 @@ namespace ElViaje.App
             return l;
         }
 
-        // Columna flotante derecha: libro, dado, mazo y "Terminar turno" (compacta).
-        VisualElement SideColumn(GameState s)
+        // Controles: libro, dado, mazo y "Terminar turno".
+        // row=false → columna lateral (apaisado); row=true → barra horizontal (retrato).
+        VisualElement Controls(GameState s, bool row)
         {
-            var col = new VisualElement();
-            col.style.width = 118;
-            col.style.alignItems = Align.Center;
-            col.style.justifyContent = Justify.FlexStart;
-            col.style.paddingTop = 4;
+            var c = new VisualElement();
+            c.style.flexDirection = row ? FlexDirection.Row : FlexDirection.Column;
+            c.style.alignItems = Align.Center;
+            c.style.justifyContent = Justify.Center;
+            if (row) { c.style.height = 116; c.style.marginTop = 2; }
+            else { c.style.width = 118; c.style.paddingTop = 4; c.style.justifyContent = Justify.FlexStart; }
+
+            void Gap(VisualElement e, bool first)
+            {
+                if (first) return;
+                if (row) e.style.marginLeft = 14;
+                else e.style.marginTop = 10;
+            }
 
             // Libro
             var book = new Button(() => { bookOpen = !bookOpen; ReRender(); });
-            book.style.width = 78;
-            book.style.height = 78;
+            book.style.width = 72;
+            book.style.height = 72;
             book.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
             NoBorder(book);
             CardSprites.ApplyImageContain(book, "book-closed");
-            col.Add(book);
-            col.Add(SmallLabel("Abrir libro"));
+            Gap(book, true);
+            c.Add(book);
 
             // Dado
             bool canRoll = s.Phase == Phase.Roll;
             var die = new Button(() => { if (canRoll) OnRoll?.Invoke(); });
-            die.style.width = 68;
-            die.style.height = 68;
-            die.style.marginTop = 6;
+            die.style.width = 64;
+            die.style.height = 64;
             die.style.opacity = canRoll ? 1f : 0.4f;
             die.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
             NoBorder(die);
             CardSprites.ApplyImageContain(die, "die");
-            col.Add(die);
+            Gap(die, false);
+            c.Add(die);
 
             // Mazo (apilado)
             bool canDraw = s.Phase == Phase.Draw && !Engine.IsPossessed(s);
-            col.Add(DeckCard(s.Deck.Count, canDraw));
+            var deck = DeckCard(s.Deck.Count, canDraw);
+            Gap(deck, false);
+            c.Add(deck);
 
             // Terminar turno: siempre visible, activo solo al moverse.
             bool canEnd = s.Phase == Phase.Move;
             var end = MakeButton("Terminar turno", () => { if (canEnd) OnEndMove?.Invoke(); });
-            end.style.marginTop = 12;
             end.style.opacity = canEnd ? 1f : 0.4f;
             if (canEnd) end.style.backgroundColor = new StyleColor(new Color(0.55f, 0.16f, 0.16f));
-            col.Add(end);
-            if (canEnd) col.Add(SmallLabel($"Pasos: {s.MovesLeft}"));
+            Gap(end, false);
+            c.Add(end);
 
-            return col;
+            return c;
         }
 
         static void NoBorder(VisualElement e)
@@ -574,7 +633,6 @@ namespace ElViaje.App
             var b = new Button(() => { if (active) OnDraw?.Invoke(); });
             b.style.width = cw + span;
             b.style.height = ch + span;
-            b.style.marginTop = 12;
             b.style.paddingLeft = 0;
             b.style.paddingRight = 0;
             b.style.paddingTop = 0;
