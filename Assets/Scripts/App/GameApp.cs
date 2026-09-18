@@ -26,6 +26,9 @@ namespace ElViaje.App
         string selectedCardId;
         bool rolling;
 
+        AudioSource musicMain, musicBoss;
+        bool muted;
+
         void Start()
         {
             var doc = GetComponent<UIDocument>();
@@ -56,13 +59,15 @@ namespace ElViaje.App
             controller = GetComponent<GameController>();
             if (controller == null) controller = gameObject.AddComponent<GameController>();
 
+            SetupAudio();
+
             view = new BoardView(boardRoot, controller);
             WireCallbacks();
 
             controller.StateChanged += OnStateChanged;
 
             if (controller.HasGame) OnStateChanged(controller.State);
-            else view.OpenStart();
+            else { view.OpenStart(); ApplyMusic(null); }
         }
 
         void OnDisable()
@@ -125,12 +130,23 @@ namespace ElViaje.App
             view.OnDiscard = id => controller.Dispatch(GameAction.Discard(id));
             view.OnCombatSelect = (r, c) => controller.Dispatch(GameAction.CombatSelect(r, c));
             view.OnCombatRetreat = () => controller.Dispatch(GameAction.CombatRetreat());
+
+            view.Muted = muted;
+            view.OnToggleMute = () =>
+            {
+                muted = !muted;
+                view.Muted = muted;
+                ApplyMusic(controller.State);
+                view.Refresh();
+            };
         }
 
         void OnStateChanged(GameState s)
         {
             view.SelectedCardId = selectedCardId;
             view.Render(s);
+
+            ApplyMusic(s);
 
             if (s.Status != GameStatus.Playing) return;
 
@@ -140,6 +156,47 @@ namespace ElViaje.App
             // Con un General en mano (Posesión) no se roba: se salta la fase.
             else if (s.Phase == Phase.Draw && Engine.IsPossessed(s))
                 controller.Dispatch(GameAction.Draw());
+        }
+
+        // -------------------------------------------------------------------
+        // Música: principal en el juego, melodía de jefe en combate/final.
+        // -------------------------------------------------------------------
+        void SetupAudio()
+        {
+            musicMain = gameObject.AddComponent<AudioSource>();
+            musicMain.clip = Resources.Load<AudioClip>("Audio/music-main");
+            musicMain.loop = true;
+            musicMain.volume = 0.35f;
+            musicMain.playOnAwake = false;
+
+            musicBoss = gameObject.AddComponent<AudioSource>();
+            musicBoss.clip = Resources.Load<AudioClip>("Audio/music-boss");
+            musicBoss.loop = true;
+            musicBoss.volume = 0.4f;
+            musicBoss.playOnAwake = false;
+        }
+
+        void ApplyMusic(GameState s)
+        {
+            if (musicMain == null || musicBoss == null) return;
+            if (muted)
+            {
+                if (musicMain.isPlaying) musicMain.Pause();
+                if (musicBoss.isPlaying) musicBoss.Pause();
+                return;
+            }
+            bool boss = s != null && s.Status == GameStatus.Playing
+                && (s.Phase == Phase.Combat || s.Phase == Phase.Final);
+            if (boss)
+            {
+                if (musicMain.isPlaying) musicMain.Pause();
+                if (!musicBoss.isPlaying) musicBoss.Play();
+            }
+            else
+            {
+                if (musicBoss.isPlaying) musicBoss.Pause();
+                if (!musicMain.isPlaying) musicMain.Play();
+            }
         }
 
         // -------------------------------------------------------------------

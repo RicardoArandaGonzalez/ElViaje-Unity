@@ -49,6 +49,10 @@ namespace ElViaje.App
         public Action<int, int> OnCombatSelect;
         public Action OnCombatRetreat;
         public Action<Difficulty, Starter> OnStartGame;
+        public Action OnToggleMute;
+        public bool Muted;
+
+        public void Refresh() => ReRender();
 
         public BoardView(VisualElement root, GameController controller)
         {
@@ -263,6 +267,10 @@ namespace ElViaje.App
             var hint = MakeLabel(Hint(s), 12, Highlight);
             hint.style.flexGrow = 1;
             bar.Add(hint);
+
+            var music = NavButton("♪", () => OnToggleMute?.Invoke());
+            music.style.opacity = Muted ? 0.35f : 1f;
+            bar.Add(music);
 
             bar.Add(NavButton("－", () => Zoom(1f / 1.2f)));
             var zoomLbl = MakeLabel($"{Mathf.RoundToInt(boardScale / DefaultZoom * 100)}%", 11);
