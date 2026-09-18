@@ -102,6 +102,8 @@ namespace ElViaje.App
                     blockedRegion = RegOut(c.BlockedByGeneralRegion),
                 }).ToList(),
                 log = s.Log.Select(l => new LogDto { turn = l.Turn, text = l.Text, kind = (int)l.Kind }).ToList(),
+                lastRoad = StrOut(s.LastRoad),
+                chronicle = s.Chronicle.Select(e => new ChronDto { kind = e.Kind, name = StrOut(e.Name), road = StrOut(e.Road), extra = StrOut(e.Extra) }).ToList(),
                 hasCombat = s.PendingCombat != null,
                 hasWorld = s.PendingWorldPlacement != null,
             };
@@ -182,6 +184,10 @@ namespace ElViaje.App
             foreach (var l in d.log ?? new List<LogDto>())
                 s.Log.Add(new LogEntry { Turn = l.turn, Text = l.text, Kind = (LogKind)l.kind });
 
+            s.LastRoad = StrIn(d.lastRoad);
+            foreach (var e in d.chronicle ?? new List<ChronDto>())
+                s.Chronicle.Add(new ChronicleEvent { Kind = e.kind, Name = StrIn(e.name), Road = StrIn(e.road), Extra = StrIn(e.extra) });
+
             if (d.hasCombat && d.combat != null)
             {
                 var pc = d.combat;
@@ -228,7 +234,11 @@ namespace ElViaje.App
             public bool hasCombat, hasWorld;
             public CombatDto combat;
             public WorldDto world;
+            public string lastRoad;
+            public List<ChronDto> chronicle;
         }
+
+        [Serializable] class ChronDto { public string kind, name, road, extra; }
 
         [Serializable] class MemberDto { public string cardId, name; public int basePower, region; public bool isHeroine; }
         [Serializable] class PlacedDto { public string cardId, name; public int x, y, kind, region, blockedRegion; public List<int> conns; public bool villageActivated, heroRecruited; }

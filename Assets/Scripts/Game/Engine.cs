@@ -299,11 +299,24 @@ namespace ElViaje.Game
             {
                 s.Party.X = action.X;
                 s.Party.Y = action.Y;
-                ResolveTile(s, action.X, action.Y);
+                // Primera frase de la crónica: describe la primera carta jugada.
+                string kind = card.Kind switch
+                {
+                    CardKind.Camino => "camino",
+                    CardKind.Pueblo => "pueblo",
+                    CardKind.Heroe => "hero",
+                    CardKind.General => "general",
+                    _ => "otro",
+                };
+                AddChronicle(s, "start", card.Name, kind);
+                ResolveTile(s, action.X, action.Y, chronicle: false);
             }
             s.Phase = Phase.Roll;
             return s;
         }
+
+        private static void AddChronicle(GameState s, string kind, string name = null, string extra = null)
+            => s.Chronicle.Add(new ChronicleEvent { Kind = kind, Name = name, Road = s.LastRoad, Extra = extra });
 
         private static GameState DoDiscard(GameState s, string cardId)
         {
@@ -383,11 +396,14 @@ namespace ElViaje.Game
             return s;
         }
 
-        private static string ResolveTile(GameState s, int x, int y)
+        private static string ResolveTile(GameState s, int x, int y, bool chronicle = true)
         {
             if (!s.Grid.TryGetValue(Geometry.Key(x, y), out var cell)) return "none";
 
             if (cell.Kind == CardKind.Castillo) return "castle";
+
+            // Recordar el último camino recorrido (para contextualizar la crónica).
+            if (cell.Kind == CardKind.Camino) s.LastRoad = cell.Name;
 
             if (cell.Kind == CardKind.Pueblo && !cell.VillageActivated)
             {
@@ -397,6 +413,7 @@ namespace ElViaje.Game
                 if (cell.Region.HasValue) s.VillageBonus[cell.Region.Value] += bonus;
                 s.Stats.VillagesActivated++;
                 PushLog(s, LogKind.Player, $"Activas el Pueblo {cell.Name}: +{bonus} Poder a los héroes de {cell.Region}.");
+                if (chronicle) AddChronicle(s, "pueblo", cell.Name);
             }
 
             if (cell.Kind == CardKind.Heroe && !cell.HeroRecruited)
@@ -408,6 +425,7 @@ namespace ElViaje.Game
                 });
                 s.Stats.HeroesRecruited++;
                 PushLog(s, LogKind.Player, $"¡{cell.Name} se une a tu Party! (§20)");
+                if (chronicle) AddChronicle(s, "hero", cell.Name);
             }
 
             return "none";
@@ -463,6 +481,8 @@ namespace ElViaje.Game
             };
             s.Phase = Phase.Combat;
             s.Stats.GeneralsFought++;
+            if (isRey) AddChronicle(s, "final", "Castillo del Rey Demonio");
+            else AddChronicle(s, "general", Cards.GetCard(opts.CardId).Name);
             return s;
         }
 
@@ -484,6 +504,7 @@ namespace ElViaje.Game
                 s.Status = GameStatus.Won;
                 s.EndReason = "¡Derrotaste al Rey Demonio! Destruiste sus Corazones.";
                 PushLog(s, LogKind.Combat, s.EndReason);
+                AddChronicle(s, "victory");
                 s.PendingCombat = null;
                 return s;
             }
@@ -694,6 +715,11 @@ namespace ElViaje.Game
             s.Status = GameStatus.Lost;
             s.EndReason = reason;
             PushLog(s, LogKind.System, $"GAME OVER: {reason}");
+            // Crónica: atribuir el enemigo solo si cayó combatiendo (agotó intentos).
+            var pc = s.PendingCombat;
+            bool inCombatDeath = pc != null && reason.Contains("intento");
+            string enemy = inCombatDeath ? (pc.IsRey ? "Rey Demonio" : Cards.GetCard(pc.CardId).Name) : null;
+            s.Chronicle.Add(new ChronicleEvent { Kind = "defeat", Name = enemy, Road = s.LastRoad, Extra = reason });
             return s;
         }
 

@@ -1399,24 +1399,95 @@ namespace ElViaje.App
         // -------------------------------------------------------------------
         // Fin de partida
         // -------------------------------------------------------------------
+        // Pantalla final: crónica del viaje sobre un pergamino, con capital "E".
         VisualElement EndPanel(GameState s, GameOverInfo go)
         {
             var panel = new VisualElement();
-            panel.style.marginTop = 20;
+            panel.style.flexGrow = 1;
             panel.style.alignItems = Align.Center;
-            string txt = go.Status == GameStatus.Won ? "🏆 ¡Victoria!" : "💀 Derrota";
-            var h = MakeLabel(txt, 28, go.Status == GameStatus.Won ? Highlight : new Color(0.8f, 0.3f, 0.3f));
-            panel.Add(h);
-            if (!string.IsNullOrEmpty(s.EndReason))
+            panel.style.justifyContent = Justify.Center;
+            panel.style.paddingTop = 10;
+            panel.style.paddingBottom = 10;
+
+            var card = new VisualElement();
+            card.style.width = Length.Percent(94);
+            card.style.maxWidth = 640;
+            card.style.maxHeight = Length.Percent(96);
+            card.style.backgroundColor = new StyleColor(new Color(0.94f, 0.90f, 0.80f));
+            card.style.paddingLeft = 22;
+            card.style.paddingRight = 22;
+            card.style.paddingTop = 16;
+            card.style.paddingBottom = 16;
+            card.style.borderTopLeftRadius = 12;
+            card.style.borderTopRightRadius = 12;
+            card.style.borderBottomLeftRadius = 12;
+            card.style.borderBottomRightRadius = 12;
+            card.style.borderTopWidth = 3;
+            card.style.borderBottomWidth = 3;
+            card.style.borderLeftWidth = 3;
+            card.style.borderRightWidth = 3;
+            SetBorderColor(card, new Color(0.45f, 0.32f, 0.15f));
+
+            bool won = go.Status == GameStatus.Won;
+            var title = new Label(won ? "Victoria" : "Derrota");
+            title.style.unityTextAlign = TextAnchor.MiddleCenter;
+            title.style.unityFontStyleAndWeight = FontStyle.Bold;
+            title.style.fontSize = 30;
+            title.style.letterSpacing = 3;
+            title.style.marginBottom = 10;
+            title.style.color = new StyleColor(won ? new Color(0.55f, 0.40f, 0.10f) : new Color(0.60f, 0.16f, 0.16f));
+            card.Add(title);
+
+            var paras = Chronicle.Build(s);
+            Color ink = new(0.20f, 0.12f, 0.05f);
+
+            var scroll = new ScrollView();
+            scroll.style.flexGrow = 1;
+            scroll.style.marginBottom = 12;
+
+            // Primer párrafo con capital "E" ilustrada (la frase empieza por "El ...").
+            if (paras.Count > 0)
             {
-                var r = MakeLabel(s.EndReason, 13);
-                r.style.whiteSpace = WhiteSpace.Normal;
-                r.style.marginTop = 8;
-                panel.Add(r);
+                var firstRow = new VisualElement();
+                firstRow.style.flexDirection = FlexDirection.Row;
+                firstRow.style.alignItems = Align.FlexStart;
+
+                var cap = new VisualElement();
+                cap.style.width = 66;
+                cap.style.height = 66;
+                cap.style.marginRight = 8;
+                cap.style.flexShrink = 0;
+                CardSprites.ApplyImageContain(cap, "capital-e");
+                firstRow.Add(cap);
+
+                string first = paras[0];
+                if (first.StartsWith("E")) first = first.Substring(1); // la "E" la pone la capital
+                var firstText = new Label(first);
+                firstText.style.color = new StyleColor(ink);
+                firstText.style.fontSize = 15;
+                firstText.style.whiteSpace = WhiteSpace.Normal;
+                firstText.style.flexGrow = 1;
+                firstText.style.flexShrink = 1;
+                firstRow.Add(firstText);
+                scroll.Add(firstRow);
             }
+
+            for (int i = 1; i < paras.Count; i++)
+            {
+                var p = new Label(paras[i]);
+                p.style.color = new StyleColor(ink);
+                p.style.fontSize = 14;
+                p.style.whiteSpace = WhiteSpace.Normal;
+                p.style.marginTop = 8;
+                scroll.Add(p);
+            }
+            card.Add(scroll);
+
             var nueva = MakeButton("Nueva partida", () => OnNewGame?.Invoke(), Highlight);
-            nueva.style.marginTop = 14;
-            panel.Add(nueva);
+            nueva.style.alignSelf = Align.Center;
+            card.Add(nueva);
+
+            panel.Add(card);
             return panel;
         }
     }

@@ -61,6 +61,17 @@ namespace ElViaje.Game
         public LogEntry Clone() => new() { Turn = Turn, Text = Text, Kind = Kind };
     }
 
+    /// <summary>Evento de la crónica (la prosa se genera en la capa de UI).</summary>
+    public sealed class ChronicleEvent
+    {
+        public string Kind;   // start | pueblo | hero | general | final | defeat | victory
+        public string Name;   // nombre de carta / enemigo
+        public string Road;   // último camino recorrido antes del evento (o null)
+        public string Extra;  // usos varios (p. ej. tipo de la primera carta)
+
+        public ChronicleEvent Clone() => new() { Kind = Kind, Name = Name, Road = Road, Extra = Extra };
+    }
+
     /// <summary>Una colocación candidata para una carta.</summary>
     public sealed class Placement
     {
@@ -206,6 +217,11 @@ namespace ElViaje.Game
         public Stats Stats = new();
         public List<LogEntry> Log = new();
 
+        /// <summary>Historial estructurado para la crónica final (§crónica).</summary>
+        public List<ChronicleEvent> Chronicle = new();
+        /// <summary>Último camino recorrido, para contextualizar los eventos.</summary>
+        public string LastRoad;
+
         public PendingWorldPlacement PendingWorldPlacement;
 
         public GameState Clone()
@@ -235,9 +251,12 @@ namespace ElViaje.Game
                 Grid = new Dictionary<string, PlacedCard>(Grid.Count),
                 VillageBonus = new Dictionary<Region, int>(VillageBonus),
                 Log = new List<LogEntry>(Log.Count),
+                Chronicle = new List<ChronicleEvent>(Chronicle.Count),
+                LastRoad = LastRoad,
             };
             foreach (var kv in Grid) copy.Grid[kv.Key] = kv.Value.Clone();
             foreach (var e in Log) copy.Log.Add(e.Clone());
+            foreach (var e in Chronicle) copy.Chronicle.Add(e.Clone());
             return copy;
         }
     }
