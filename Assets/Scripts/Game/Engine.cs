@@ -170,9 +170,9 @@ namespace ElViaje.Game
         public static List<(int x, int y)> GetStepTargets(GameState s)
         {
             if (s.Phase != Phase.Move || s.MovesLeft <= 0) return new List<(int, int)>();
-            return Geometry.ConnectedNeighbors(s.Grid, s.Party.X, s.Party.Y)
-                .Where(n => !s.VisitedThisTurn.Contains(Geometry.Key(n.x, n.y)))
-                .ToList();
+            // Movimiento libre por el mapa construido hasta agotar los pasos
+            // (sin la restricción de casillas ya visitadas este turno).
+            return Geometry.ConnectedNeighbors(s.Grid, s.Party.X, s.Party.Y);
         }
 
         // -------------------------------------------------------------------

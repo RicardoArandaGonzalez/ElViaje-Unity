@@ -30,6 +30,16 @@ namespace ElViaje.App
         int startStep = 1;
         Difficulty startDiff = Difficulty.Medio;
 
+        // Navegación del tablero (zoom / desplazamiento)
+        const float DefaultZoom = 1.6f;
+        float boardScale = DefaultZoom;
+        Vector2 boardOffset = Vector2.zero;
+        bool boardInit;
+        int gridMinX, gridMinY;
+        VisualElement viewport, content;
+        bool dragging;
+        Vector2 dragStart, offsetStart;
+
         // Callbacks (los conecta GameApp)
         public Action<string> OnSelectCard;
         public Action<int, int> OnPlace;
@@ -138,10 +148,10 @@ namespace ElViaje.App
             root.style.flexGrow = 1;
             root.style.backgroundColor = new StyleColor(Bg);
             CardSprites.ApplyMesa(root); // mesa de madera de fondo
-            root.style.paddingLeft = 12;
-            root.style.paddingRight = 12;
-            root.style.paddingTop = 10;
-            root.style.paddingBottom = 10;
+            root.style.paddingLeft = 8;
+            root.style.paddingRight = 8;
+            root.style.paddingTop = 6;
+            root.style.paddingBottom = 6;
 
             root.Add(TopBar(s));
 
@@ -156,13 +166,51 @@ namespace ElViaje.App
             }
             else
             {
-                var scroll = new ScrollView(ScrollViewMode.VerticalAndHorizontal);
-                scroll.style.flexGrow = 1;
-                scroll.style.marginTop = 8;
-                scroll.style.marginBottom = 8;
-                scroll.Add(BoardGrid(s));
-                root.Add(scroll);
-                root.Add(ActionBar(s));
+                // Zona principal: tablero (izquierda) + columna flotante (derecha).
+                var main = new VisualElement();
+                main.style.flexDirection = FlexDirection.Row;
+                main.style.flexGrow = 1;
+                main.style.marginTop = 2;
+
+                // Viewport con recorte; el contenido se traslada/escala (pan + zoom).
+                viewport = new VisualElement();
+                viewport.style.flexGrow = 1;
+                viewport.style.overflow = Overflow.Hidden;
+                viewport.style.position = Position.Relative;
+
+                content = new VisualElement();
+                content.style.position = Position.Absolute;
+                content.Add(BoardGrid(s));
+                viewport.Add(content);
+
+                viewport.RegisterCallback<PointerDownEvent>(e =>
+                {
+                    dragging = true;
+                    dragStart = new Vector2(e.position.x, e.position.y);
+                    offsetStart = boardOffset;
+                });
+                viewport.RegisterCallback<PointerMoveEvent>(e =>
+                {
+                    if (!dragging) return;
+                    var d = new Vector2(e.position.x, e.position.y) - dragStart;
+                    boardOffset = offsetStart + d;
+                    ApplyBoardTransform();
+                });
+                viewport.RegisterCallback<PointerUpEvent>(_ => dragging = false);
+                viewport.RegisterCallback<PointerLeaveEvent>(_ => dragging = false);
+
+                main.Add(viewport);
+                main.Add(SideColumn(s));
+                root.Add(main);
+
+                root.Add(HandBar(s)); // mano en abanico, siempre visible
+
+                ApplyBoardTransform();
+                if (!boardInit)
+                {
+                    boardInit = true;
+                    viewport.schedule.Execute(() => CenterOnParty(s)); // tras el layout
+                }
             }
 
             if (bookOpen) root.Add(BookOverlay(s));
@@ -172,7 +220,15 @@ namespace ElViaje.App
         void ReRender() { if (current != null) Render(current); }
 
         // --- Pantalla de inicio ---
-        public void OpenStart() { startOpen = true; startStep = 1; RefreshStart(); }
+        public void OpenStart()
+        {
+            startOpen = true;
+            startStep = 1;
+            boardInit = false;              // re-encuadra el tablero en la nueva partida
+            boardScale = DefaultZoom;
+            boardOffset = Vector2.zero;
+            RefreshStart();
+        }
 
         void RefreshStart()
         {
@@ -201,13 +257,21 @@ namespace ElViaje.App
             title.style.marginRight = 18;
             bar.Add(title);
             bar.Add(MakeLabel($"Turno {s.Turn}"));
-            bar.Add(MakeLabel($"Fase: {PhaseEs(s.Phase)}"));
             bar.Add(MakeLabel($"Poder: {Engine.GetPartyPower(s)}"));
             bar.Add(MakeLabel($"Generales: {s.GeneralsDefeated}/4"));
-            bar.Add(MakeLabel($"Mano: {s.Hand.Count}  Mazo: {s.Deck.Count}"));
 
-            var libro = MakeButton(bookOpen ? "📖 Cerrar" : "📖 Libro", () => { bookOpen = !bookOpen; ReRender(); });
-            bar.Add(libro);
+            var hint = MakeLabel(Hint(s), 12, Highlight);
+            hint.style.flexGrow = 1;
+            bar.Add(hint);
+
+            bar.Add(NavButton("－", () => Zoom(1f / 1.2f)));
+            var zoomLbl = MakeLabel($"{Mathf.RoundToInt(boardScale / DefaultZoom * 100)}%", 11);
+            zoomLbl.style.marginLeft = 4;
+            zoomLbl.style.marginRight = 4;
+            bar.Add(zoomLbl);
+            bar.Add(NavButton("＋", () => Zoom(1.2f)));
+            bar.Add(NavButton("⊙", () => { if (current != null) CenterOnParty(current); }));
+
             var nueva = MakeButton("Nueva partida", () => OnNewGame?.Invoke());
             bar.Add(nueva);
             return bar;
@@ -235,6 +299,7 @@ namespace ElViaje.App
             foreach (var t in steps) Inc(t.x, t.y);
             // margen de una celda alrededor para ver la frontera
             minX -= 1; minY -= 1; maxX += 1; maxY += 1;
+            gridMinX = minX; gridMinY = minY; // para centrar el Party
 
             var col = new VisualElement();
             for (int y = minY; y <= maxY; y++)
@@ -351,7 +416,7 @@ namespace ElViaje.App
         static string Shorten(string s, int n) => s.Length <= n ? s : s.Substring(0, n - 1) + "…";
 
         /// <summary>Aplica el arte de una carta a un elemento. true si había arte (false → castillo/rey).</summary>
-        static bool ApplyCardArt(VisualElement box, CardKind kind, Region? region, List<Dir> connections)
+        public static bool ApplyCardArt(VisualElement box, CardKind kind, Region? region, List<Dir> connections)
         {
             var rect = CardSprites.GetSpriteRect(kind, region, connections);
             if (rect.HasValue) { CardSprites.ApplyTo(box, rect.Value); return true; }
@@ -363,65 +428,241 @@ namespace ElViaje.App
             return false;
         }
 
-        // -------------------------------------------------------------------
-        // Barra de acción según la fase
-        // -------------------------------------------------------------------
-        VisualElement ActionBar(GameState s)
+        static string Hint(GameState s)
         {
-            var bar = Row();
-            bar.style.backgroundColor = new StyleColor(Panel);
-            bar.style.paddingLeft = 10;
-            bar.style.paddingRight = 10;
-            bar.style.paddingBottom = 8;
-            bar.style.borderTopLeftRadius = 8;
-            bar.style.borderTopRightRadius = 8;
-            bar.style.borderBottomLeftRadius = 8;
-            bar.style.borderBottomRightRadius = 8;
-
             switch (s.Phase)
             {
-                case Phase.Draw:
-                    bar.Add(MakeButton("🂠 Robar carta", () => OnDraw?.Invoke(), Highlight));
-                    break;
-
-                case Phase.Play:
-                {
-                    bar.Add(MakeLabel("Tu mano:"));
-                    var legal = controller.LegalMoves();
-                    bool canDiscard = legal.Exists(m => m.Type == ActionType.Discard);
-                    foreach (var id in s.Hand)
-                        bar.Add(HandCard(id));
-                    if (canDiscard)
-                    {
-                        bar.Add(MakeLabel("· Sin jugada legal, descarta:"));
-                        foreach (var id in s.Hand)
-                            if (Cards.GetCard(id).Kind != CardKind.General)
-                                bar.Add(MakeButton($"🗑 {Shorten(Cards.GetCard(id).Name, 12)}", () => OnDiscard?.Invoke(id)));
-                    }
-                    else if (SelectedCardId != null)
-                        bar.Add(MakeLabel("→ elige una casilla ＋"));
-                    break;
-                }
-
-                case Phase.Roll:
-                    bar.Add(MakeLabel("Tira el dado:"));
-                    bar.Add(DieButton());
-                    break;
-
-                case Phase.Move:
-                    bar.Add(MakeLabel($"🎲 {s.LastRoll}  ·  Movimiento restante: {s.MovesLeft}"));
-                    bar.Add(MakeButton("Terminar movimiento", () => OnEndMove?.Invoke()));
-                    break;
-
-                case Phase.World:
-                    bar.Add(MakeLabel("El Mundo está jugando…"));
-                    break;
+                case Phase.Draw: return "Roba una carta del mazo →";
+                case Phase.Play: return "Selecciona una carta de tu mano ↓";
+                case Phase.Roll: return "Tira el dado →";
+                case Phase.Move: return "Muévete libremente o termina el turno";
+                case Phase.World: return "Turno del Mundo…";
+                default: return "";
             }
-            return bar;
         }
 
-        // Mini-carta de la mano: sprite + nombre, clicable. Los Generales invocan.
-        VisualElement HandCard(string id)
+        Button NavButton(string glyph, Action onClick)
+        {
+            var b = new Button(() => onClick()) { text = glyph };
+            b.style.width = 30;
+            b.style.height = 28;
+            b.style.marginLeft = 3;
+            b.style.paddingLeft = 0;
+            b.style.paddingRight = 0;
+            b.style.paddingTop = 0;
+            b.style.paddingBottom = 0;
+            b.style.backgroundColor = new StyleColor(Panel);
+            b.style.color = new StyleColor(Ink);
+            b.style.fontSize = 15;
+            b.style.borderTopLeftRadius = 6;
+            b.style.borderTopRightRadius = 6;
+            b.style.borderBottomLeftRadius = 6;
+            b.style.borderBottomRightRadius = 6;
+            return b;
+        }
+
+        void ApplyBoardTransform()
+        {
+            if (content == null) return;
+            content.style.transformOrigin = new TransformOrigin(0, 0);
+            content.style.translate = new Translate(boardOffset.x, boardOffset.y);
+            content.style.scale = new Scale(new Vector3(boardScale, boardScale, 1f));
+        }
+
+        void Zoom(float factor)
+        {
+            boardScale = Mathf.Clamp(boardScale * factor, 0.4f, 2.5f);
+            ApplyBoardTransform();
+            ReRender(); // refresca el % mostrado en la barra
+        }
+
+        // Centra el Party en el viewport (cell = 62 + 2 de margen = 64).
+        void CenterOnParty(GameState s)
+        {
+            if (viewport == null) return;
+            var vb = viewport.layout;
+            if (float.IsNaN(vb.width) || vb.width <= 1f) return;
+            const float cell = 64f;
+            float px = ((s.Party.X - gridMinX) + 0.5f) * cell;
+            float py = ((s.Party.Y - gridMinY) + 0.5f) * cell;
+            boardOffset = new Vector2(vb.width / 2f - px * boardScale, vb.height / 2f - py * boardScale);
+            ApplyBoardTransform();
+        }
+
+        Label SmallLabel(string t)
+        {
+            var l = new Label(t);
+            l.style.color = new StyleColor(Ink);
+            l.style.fontSize = 10;
+            l.style.unityTextAlign = TextAnchor.MiddleCenter;
+            l.style.unityFontStyleAndWeight = FontStyle.Bold;
+            l.style.marginTop = 2;
+            l.style.marginBottom = 6;
+            return l;
+        }
+
+        // Columna flotante derecha: libro, dado, mazo y "Terminar turno" (compacta).
+        VisualElement SideColumn(GameState s)
+        {
+            var col = new VisualElement();
+            col.style.width = 118;
+            col.style.alignItems = Align.Center;
+            col.style.justifyContent = Justify.FlexStart;
+            col.style.paddingTop = 4;
+
+            // Libro
+            var book = new Button(() => { bookOpen = !bookOpen; ReRender(); });
+            book.style.width = 78;
+            book.style.height = 78;
+            book.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
+            NoBorder(book);
+            CardSprites.ApplyImageContain(book, "book-closed");
+            col.Add(book);
+            col.Add(SmallLabel("Abrir libro"));
+
+            // Dado
+            bool canRoll = s.Phase == Phase.Roll;
+            var die = new Button(() => { if (canRoll) OnRoll?.Invoke(); });
+            die.style.width = 68;
+            die.style.height = 68;
+            die.style.marginTop = 6;
+            die.style.opacity = canRoll ? 1f : 0.4f;
+            die.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
+            NoBorder(die);
+            CardSprites.ApplyImageContain(die, "die");
+            col.Add(die);
+
+            // Mazo (apilado)
+            bool canDraw = s.Phase == Phase.Draw && !Engine.IsPossessed(s);
+            col.Add(DeckCard(s.Deck.Count, canDraw));
+
+            // Terminar turno: siempre visible, activo solo al moverse.
+            bool canEnd = s.Phase == Phase.Move;
+            var end = MakeButton("Terminar turno", () => { if (canEnd) OnEndMove?.Invoke(); });
+            end.style.marginTop = 12;
+            end.style.opacity = canEnd ? 1f : 0.4f;
+            if (canEnd) end.style.backgroundColor = new StyleColor(new Color(0.55f, 0.16f, 0.16f));
+            col.Add(end);
+            if (canEnd) col.Add(SmallLabel($"Pasos: {s.MovesLeft}"));
+
+            return col;
+        }
+
+        static void NoBorder(VisualElement e)
+        {
+            e.style.borderTopWidth = 0;
+            e.style.borderBottomWidth = 0;
+            e.style.borderLeftWidth = 0;
+            e.style.borderRightWidth = 0;
+        }
+
+        // Mazo apilado: varias cartas con el dorso, desplazadas 2px arriba-derecha.
+        Button DeckCard(int count, bool active)
+        {
+            const int cw = 74, ch = 100;
+            int layers = Mathf.Clamp(count / 12 + 1, 1, 5);
+            int span = (layers - 1) * 2;
+
+            var b = new Button(() => { if (active) OnDraw?.Invoke(); });
+            b.style.width = cw + span;
+            b.style.height = ch + span;
+            b.style.marginTop = 12;
+            b.style.paddingLeft = 0;
+            b.style.paddingRight = 0;
+            b.style.paddingTop = 0;
+            b.style.paddingBottom = 0;
+            b.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
+            b.style.opacity = active ? 1f : 0.75f;
+            NoBorder(b);
+
+            for (int k = 0; k < layers; k++)
+            {
+                var lay = new VisualElement();
+                lay.style.position = Position.Absolute;
+                lay.style.width = cw;
+                lay.style.height = ch;
+                lay.style.left = k * 2;               // cada carta 2px a la derecha
+                lay.style.top = (layers - 1 - k) * 2; // y 2px arriba
+                lay.style.borderTopLeftRadius = 7;
+                lay.style.borderTopRightRadius = 7;
+                lay.style.borderBottomLeftRadius = 7;
+                lay.style.borderBottomRightRadius = 7;
+                if (k == layers - 1)
+                {
+                    // Solo la carta superior muestra el dorso.
+                    CardSprites.ApplyImageCover(lay, "card-back");
+                }
+                else
+                {
+                    // Cantos de las cartas de abajo (color sólido, sin imagen).
+                    lay.style.backgroundColor = new StyleColor(new Color(0.16f, 0.13f, 0.20f));
+                    lay.style.borderTopWidth = 1; lay.style.borderBottomWidth = 1;
+                    lay.style.borderLeftWidth = 1; lay.style.borderRightWidth = 1;
+                    SetBorderColor(lay, new Color(0f, 0f, 0f, 0.5f));
+                }
+                b.Add(lay);
+            }
+
+            // Marca superior: contador + resaltado si se puede robar.
+            var top = new VisualElement();
+            top.style.position = Position.Absolute;
+            top.style.left = span;
+            top.style.top = 0;
+            top.style.width = cw;
+            top.style.height = ch;
+            top.style.justifyContent = Justify.FlexEnd;
+            top.style.alignItems = Align.Center;
+            top.pickingMode = PickingMode.Ignore;
+            if (active)
+            {
+                top.style.borderTopWidth = 2; top.style.borderBottomWidth = 2;
+                top.style.borderLeftWidth = 2; top.style.borderRightWidth = 2;
+                SetBorderColor(top, Highlight);
+                top.style.borderTopLeftRadius = 7; top.style.borderTopRightRadius = 7;
+                top.style.borderBottomLeftRadius = 7; top.style.borderBottomRightRadius = 7;
+            }
+            var c = new Label(count.ToString());
+            c.style.color = new StyleColor(Ink);
+            c.style.fontSize = 12;
+            c.style.unityFontStyleAndWeight = FontStyle.Bold;
+            c.style.marginBottom = 4;
+            c.style.paddingLeft = 6; c.style.paddingRight = 6;
+            c.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0.55f));
+            c.style.borderTopLeftRadius = 6; c.style.borderTopRightRadius = 6;
+            c.style.borderBottomLeftRadius = 6; c.style.borderBottomRightRadius = 6;
+            top.Add(c);
+            b.Add(top);
+            return b;
+        }
+
+        // Mano en abanico (sin recuadro).
+        VisualElement HandBar(GameState s)
+        {
+            var wrap = new VisualElement();
+            wrap.style.flexDirection = FlexDirection.Row;
+            wrap.style.justifyContent = Justify.Center;
+            wrap.style.alignItems = Align.FlexEnd;
+            wrap.style.alignSelf = Align.Center; // la caja mide solo lo que ocupan las cartas
+            wrap.style.height = 122;
+            wrap.style.marginTop = 0;
+
+            bool stuck = controller.LegalMoves().Exists(m => m.Type == ActionType.Discard);
+            int n = s.Hand.Count;
+            for (int i = 0; i < n; i++)
+            {
+                float f = n > 1 ? (i / (float)(n - 1)) - 0.5f : 0f; // -0.5..0.5
+                var card = FanCard(s.Hand[i], stuck);
+                card.style.rotate = new Rotate(new Angle(f * 16f));
+                card.style.top = Mathf.Abs(f) * 20f; // arco: extremos más abajo
+                card.style.marginLeft = -12;
+                card.style.marginRight = -12;
+                card.style.transformOrigin = new TransformOrigin(Length.Percent(50), Length.Percent(100));
+                wrap.Add(card);
+            }
+            return wrap;
+        }
+
+        Button FanCard(string id, bool stuck)
         {
             var card = Cards.GetCard(id);
             bool isGeneral = card.Kind == CardKind.General;
@@ -430,58 +671,49 @@ namespace ElViaje.App
             var b = new Button(() =>
             {
                 if (isGeneral) OnInvokeGeneral?.Invoke();
+                else if (stuck) OnDiscard?.Invoke(id);
                 else OnSelectCard?.Invoke(id);
             });
-            b.style.width = 78;
-            b.style.height = 106;
-            b.style.marginRight = 6;
-            b.style.marginTop = 4;
+            b.style.width = 82;
+            b.style.height = 114;
             b.style.paddingLeft = 3;
             b.style.paddingRight = 3;
             b.style.paddingTop = 3;
             b.style.paddingBottom = 3;
             b.style.alignItems = Align.Center;
-            b.style.backgroundColor = new StyleColor(sel ? Highlight : Panel);
-            b.style.borderTopLeftRadius = 6;
-            b.style.borderTopRightRadius = 6;
-            b.style.borderBottomLeftRadius = 6;
-            b.style.borderBottomRightRadius = 6;
+            b.style.backgroundColor = new StyleColor(sel ? Highlight : new Color(0.12f, 0.10f, 0.14f, 0.96f));
+            b.style.borderTopLeftRadius = 8;
+            b.style.borderTopRightRadius = 8;
+            b.style.borderBottomLeftRadius = 8;
+            b.style.borderBottomRightRadius = 8;
+            b.style.borderTopWidth = 2;
+            b.style.borderBottomWidth = 2;
+            b.style.borderLeftWidth = 2;
+            b.style.borderRightWidth = 2;
+            SetBorderColor(b, sel ? new Color(1f, 0.85f, 0.4f) : new Color(0, 0, 0, 0.5f));
 
             var art = new VisualElement();
-            art.style.width = 68;
-            art.style.height = 64;
+            art.style.width = 74;
+            art.style.height = 74;
             if (!ApplyCardArt(art, card.Kind, card.Region, card.Connections))
                 art.style.backgroundColor = new StyleColor(KindColor(card.Kind));
             b.Add(art);
 
-            var label = new Label(isGeneral ? "⚔ Invocar" : Shorten(card.Name, 14));
+            var label = new Label(isGeneral ? "General Demonio" : Shorten(card.Name, 16));
             label.style.color = new StyleColor(sel ? Bg : Ink);
             label.style.fontSize = 8;
             label.style.marginTop = 2;
             label.style.whiteSpace = WhiteSpace.Normal;
             label.style.unityTextAlign = TextAnchor.MiddleCenter;
             b.Add(label);
-            return b;
-        }
 
-        // Botón-dado con la imagen del dado.
-        Button DieButton()
-        {
-            var b = new Button(() => OnRoll?.Invoke());
-            b.style.width = 64;
-            b.style.height = 64;
-            b.style.marginRight = 6;
-            b.style.marginTop = 2;
-            b.style.paddingLeft = 0;
-            b.style.paddingRight = 0;
-            b.style.paddingTop = 0;
-            b.style.paddingBottom = 0;
-            b.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
-            b.style.borderTopLeftRadius = 8;
-            b.style.borderTopRightRadius = 8;
-            b.style.borderBottomLeftRadius = 8;
-            b.style.borderBottomRightRadius = 8;
-            CardSprites.ApplyImageContain(b, "die");
+            if (stuck && !isGeneral)
+            {
+                var tag = new Label("descartar");
+                tag.style.color = new StyleColor(new Color(0.9f, 0.45f, 0.4f));
+                tag.style.fontSize = 8;
+                b.Add(tag);
+            }
             return b;
         }
 
