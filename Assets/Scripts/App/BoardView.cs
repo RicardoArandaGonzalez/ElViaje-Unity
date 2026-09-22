@@ -1131,11 +1131,11 @@ namespace ElViaje.App
         {
             var l = new Label(t);
             l.style.color = new StyleColor(InkDark);
-            l.style.fontSize = 21;
+            l.style.fontSize = 26;
             l.style.unityFontStyleAndWeight = FontStyle.Bold;
             l.style.unityTextAlign = TextAnchor.MiddleCenter;
             l.style.whiteSpace = WhiteSpace.Normal;
-            l.style.letterSpacing = 2;
+            l.style.letterSpacing = 3;
             return l;
         }
 
@@ -1163,12 +1163,12 @@ namespace ElViaje.App
             {
                 var power = new Label($"⚔ {Engine.GetPartyPower(s)}");
                 power.style.color = new StyleColor(InkDark);
-                power.style.fontSize = 21;
+                power.style.fontSize = 26;
                 power.style.unityFontStyleAndWeight = FontStyle.Bold;
                 power.style.marginTop = 6;
                 col.Add(power);
 
-                var cap = Para("Poder total del Party", 9, InkMuted);
+                var cap = Para("Poder total del Party", 10, InkMuted);
                 cap.style.marginBottom = 10;
                 col.Add(cap);
 
@@ -1180,7 +1180,7 @@ namespace ElViaje.App
                     "y derrota al Rey Demonio.",
                 })
                 {
-                    var f = Para(frase, 9, InkMuted);
+                    var f = Para(frase, 10, InkMuted);
                     f.style.marginBottom = 0;
                     col.Add(f);
                 }
@@ -1189,7 +1189,7 @@ namespace ElViaje.App
             {
                 var count = new Label($"{s.GeneralsDefeated} / 4");
                 count.style.color = new StyleColor(InkDark);
-                count.style.fontSize = 26;
+                count.style.fontSize = 32;
                 count.style.unityFontStyleAndWeight = FontStyle.Bold;
                 count.style.marginTop = 8;
                 col.Add(count);
@@ -1212,8 +1212,8 @@ namespace ElViaje.App
                 {
                     bool center = r == 0 && c == 0;
                     var cell = new Label(center ? "♥" : (Mathf.Abs(r) + Mathf.Abs(c)).ToString());
-                    cell.style.width = 18;
-                    cell.style.fontSize = 13;
+                    cell.style.width = 20;
+                    cell.style.fontSize = 15;
                     cell.style.unityTextAlign = TextAnchor.MiddleCenter;
                     cell.style.color = new StyleColor(center ? new Color(0.72f, 0.15f, 0.15f) : InkMuted);
                     row.Add(cell);
@@ -1264,13 +1264,13 @@ namespace ElViaje.App
 
             var n = new Label(Cards.RegionLabel(region));
             n.style.color = new StyleColor(bonus > 0 ? InkDark : InkMuted);
-            n.style.fontSize = 11;
-            n.style.flexGrow = 1;
+            n.style.fontSize = 13;
+            n.style.marginRight = 10; // separación mínima región → bono
             row.Add(n);
 
             var v = new Label("+" + bonus);
             v.style.color = new StyleColor(bonus > 0 ? InkDark : InkMuted);
-            v.style.fontSize = 11;
+            v.style.fontSize = 13;
             if (bonus > 0) v.style.unityFontStyleAndWeight = FontStyle.Bold;
             row.Add(v);
             return row;
@@ -1295,7 +1295,7 @@ namespace ElViaje.App
                 case "bonos":
                     foreach (var region in Cards.Regions)
                         col.Add(BonusRow(region, s.VillageBonus[region]));
-                    var bfoot = Para("Los Pueblos otorgan +1 o +2 Poder a los Héroes de su región (§22).", 9, InkMuted, center: false);
+                    var bfoot = Para("Los Pueblos otorgan +1 o +2 Poder a los Héroes de su región (§22).", 10, InkMuted, center: false);
                     bfoot.style.marginTop = 8;
                     col.Add(bfoot);
                     break;
@@ -1317,20 +1317,20 @@ namespace ElViaje.App
 
                         var t = new Label($"General {i + 1} · Poder {p}");
                         t.style.color = new StyleColor(InkDark);
-                        t.style.fontSize = 10;
+                        t.style.fontSize = 11;
                         t.style.unityFontStyleAndWeight = FontStyle.Bold;
                         block.Add(t);
 
                         string prox = i == next ? "Próximo · " : "";
                         var sub = new Label($"{prox}● {fc.Label} · {fc.Attempts} intentos");
                         sub.style.color = new StyleColor(TierColor(fc.Tier));
-                        sub.style.fontSize = 8;
+                        sub.style.fontSize = 9;
                         sub.style.whiteSpace = WhiteSpace.Normal;
                         block.Add(sub);
 
                         col.Add(block);
                     }
-                    var gfoot = Para("Iguala o supera su Poder para tener más intentos.", 8, InkMuted, center: false);
+                    var gfoot = Para("Iguala o supera su Poder para tener más intentos.", 9, InkMuted, center: false);
                     gfoot.style.marginTop = 4;
                     col.Add(gfoot);
                     break;
@@ -1340,8 +1340,8 @@ namespace ElViaje.App
                     int start = Math.Max(0, s.Log.Count - 16);
                     for (int i = start; i < s.Log.Count; i++)
                     {
-                        var l = Para("• " + s.Log[i].Text, 9, InkDark, center: false);
-                        l.style.marginBottom = 3;
+                        var l = Para("• " + s.Log[i].Text, 10, InkDark, center: false);
+                        l.style.marginBottom = 4;
                         col.Add(l);
                     }
                     break;
@@ -1362,13 +1362,13 @@ namespace ElViaje.App
 
             var n = new Label(name);
             n.style.color = new StyleColor(InkDark);
-            n.style.fontSize = 11;
-            n.style.flexGrow = 1;
+            n.style.fontSize = 13;
+            n.style.marginRight = 10; // separación mínima nombre → valor
             row.Add(n);
 
             var v = new Label(value);
             v.style.color = new StyleColor(InkDark);
-            v.style.fontSize = 11;
+            v.style.fontSize = 13;
             v.style.unityFontStyleAndWeight = FontStyle.Bold;
             row.Add(v);
             return row;
@@ -1395,7 +1395,7 @@ namespace ElViaje.App
             // Velo oscuro para legibilidad sobre el arte.
             var scrim = new VisualElement();
             scrim.style.flexGrow = 1;
-            scrim.style.backgroundColor = new StyleColor(new Color(0f, 0f, 0f, 0.45f));
+            scrim.style.backgroundColor = new StyleColor(new Color(0f, 0f, 0f, 0.58f));
             scrim.style.alignItems = Align.Center;
             scrim.style.paddingTop = 14;
             scrim.style.paddingBottom = 14;
@@ -1433,10 +1433,20 @@ namespace ElViaje.App
 
             var gridCol = new VisualElement();
             gridCol.style.marginTop = 8;
+
+            // Regla superior: esquina vacía + números de columna (1..N).
+            var ruler = new VisualElement();
+            ruler.style.flexDirection = FlexDirection.Row;
+            ruler.Add(CoordLabel("")); // esquina
+            for (int c = 0; c < pc.GridN; c++) ruler.Add(CoordLabel((c + 1).ToString()));
+            gridCol.Add(ruler);
+
             for (int r = 0; r < pc.GridN; r++)
             {
                 var rowEl = new VisualElement();
                 rowEl.style.flexDirection = FlexDirection.Row;
+                rowEl.style.alignItems = Align.Center;
+                rowEl.Add(CoordLabel(((char)('A' + r)).ToString())); // letra de fila
                 for (int c = 0; c < pc.GridN; c++)
                 {
                     string k = $"{r},{c}";
@@ -1445,7 +1455,7 @@ namespace ElViaje.App
                         var cellEl = new VisualElement();
                         CombatSize(cellEl);
                         var dc = DistColor(dist, pc.GridN);
-                        cellEl.style.backgroundColor = new StyleColor(new Color(dc.r, dc.g, dc.b, 0.85f));
+                        cellEl.style.backgroundColor = new StyleColor(new Color(dc.r, dc.g, dc.b, 0.92f));
                         cellEl.style.justifyContent = Justify.Center;
                         cellEl.style.alignItems = Align.Center;
                         var lbl = new Label(dist.ToString());
@@ -1459,7 +1469,7 @@ namespace ElViaje.App
                         int rr = r, cc = c;
                         var b = new Button(() => OnCombatSelect?.Invoke(rr, cc)) { text = "" };
                         CombatSize(b);
-                        b.style.backgroundColor = new StyleColor(new Color(0.1f, 0.09f, 0.12f, 0.5f));
+                        b.style.backgroundColor = new StyleColor(new Color(0.09f, 0.08f, 0.11f, 0.66f));
                         rowEl.Add(b);
                     }
                 }
@@ -1470,10 +1480,30 @@ namespace ElViaje.App
             return panel;
         }
 
+        static Label CoordLabel(string text)
+        {
+            var l = new Label(text);
+            l.style.width = COMBAT_CELL + 2;   // ancho de celda + sus márgenes
+            l.style.height = COMBAT_CELL;
+            l.style.unityTextAlign = TextAnchor.MiddleCenter;
+            l.style.color = new StyleColor(new Color(0.9f, 0.85f, 0.7f));
+            l.style.fontSize = 11;
+            l.style.unityFontStyleAndWeight = FontStyle.Bold;
+            return l;
+        }
+
         static void CombatSize(VisualElement e)
         {
             e.style.width = COMBAT_CELL;
             e.style.height = COMBAT_CELL;
+            // Borde cálido tenue para delinear la cuadrícula sobre el arte del jefe.
+            e.style.borderTopWidth = 1; e.style.borderBottomWidth = 1;
+            e.style.borderLeftWidth = 1; e.style.borderRightWidth = 1;
+            var edge = new Color(0.93f, 0.86f, 0.66f, 0.30f);
+            e.style.borderTopColor = new StyleColor(edge); e.style.borderBottomColor = new StyleColor(edge);
+            e.style.borderLeftColor = new StyleColor(edge); e.style.borderRightColor = new StyleColor(edge);
+            e.style.borderTopLeftRadius = 3; e.style.borderTopRightRadius = 3;
+            e.style.borderBottomLeftRadius = 3; e.style.borderBottomRightRadius = 3;
             e.style.marginLeft = 1;
             e.style.marginRight = 1;
             e.style.marginTop = 1;

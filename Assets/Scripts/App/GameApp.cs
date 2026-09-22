@@ -28,6 +28,7 @@ namespace ElViaje.App
 
         AudioSource musicMain, musicBoss;
         bool muted;
+        bool combatFlashing;
 
         void Start()
         {
@@ -128,7 +129,22 @@ namespace ElViaje.App
             view.OnEndMove = () => controller.Dispatch(GameAction.EndMove());
             view.OnInvokeGeneral = () => { selectedCardId = null; controller.Dispatch(GameAction.InvokeGeneral()); };
             view.OnDiscard = id => controller.Dispatch(GameAction.Discard(id));
-            view.OnCombatSelect = (r, c) => controller.Dispatch(GameAction.CombatSelect(r, c));
+            view.OnCombatSelect = (r, c) =>
+            {
+                if (combatFlashing) return;
+                var pc = controller.State?.PendingCombat;
+                bool heart = pc != null && r == pc.HeartR && c == pc.HeartC;
+                if (heart)
+                {
+                    string msg = pc.IsRey ? "¡Corazón del Rey destruido!" : "¡Corazón del General destruido!";
+                    bool ends = (pc.HeartsFound + 1) >= pc.HeartsTotal; // ¿este corazón cierra el combate?
+                    bool reyFinal = pc.IsRey && ends;
+                    // Solo esperamos botón cuando el combate termina (no entre corazones del Rey).
+                    string label = ends ? (reyFinal ? "Ver desenlace →" : "Regresar al mapa") : null;
+                    ShowCombatFlash(msg, label, () => controller.Dispatch(GameAction.CombatSelect(r, c)));
+                }
+                else controller.Dispatch(GameAction.CombatSelect(r, c));
+            };
             view.OnCombatRetreat = () => controller.Dispatch(GameAction.CombatRetreat());
 
             view.Muted = muted;
@@ -213,6 +229,111 @@ namespace ElViaje.App
         // -------------------------------------------------------------------
         // Animaciones (en fxRoot, independientes del re-render de la vista)
         // -------------------------------------------------------------------
+        // Animación del Corazón: 30 frames en ~1.7s (~17 fps) + retención del mensaje.
+        const int HeartFrames = 30;
+        const float HeartFramesMs = 1700f;  // reproducción de los 30 frames
+        const float HeartHoldMs = 300f;     // el mensaje se mantiene tras disiparse
+
+        void ShowCombatFlash(string msg, string buttonLabel, Action done)
+        {
+            combatFlashing = true;
+            var overlay = new VisualElement();
+            overlay.pickingMode = PickingMode.Ignore;
+            overlay.style.position = Position.Absolute;
+            overlay.style.left = 0; overlay.style.right = 0; overlay.style.top = 0; overlay.style.bottom = 0;
+            overlay.style.justifyContent = Justify.Center;
+            overlay.style.alignItems = Align.Center;
+
+            // Panel contenedor para que resalte sobre el terreno.
+            var card = new VisualElement();
+            card.style.backgroundColor = new StyleColor(new Color(0.08f, 0.06f, 0.10f, 0.92f));
+            card.style.paddingLeft = 22; card.style.paddingRight = 22;
+            card.style.paddingTop = 18; card.style.paddingBottom = 18;
+            card.style.alignItems = Align.Center;
+            card.style.borderTopLeftRadius = 16; card.style.borderTopRightRadius = 16;
+            card.style.borderBottomLeftRadius = 16; card.style.borderBottomRightRadius = 16;
+            card.style.borderTopWidth = 2; card.style.borderBottomWidth = 2;
+            card.style.borderLeftWidth = 2; card.style.borderRightWidth = 2;
+            var gold = new Color(0.95f, 0.8f, 0.35f);
+            card.style.borderTopColor = new StyleColor(gold); card.style.borderBottomColor = new StyleColor(gold);
+            card.style.borderLeftColor = new StyleColor(gold); card.style.borderRightColor = new StyleColor(gold);
+            card.style.transformOrigin = new TransformOrigin(Length.Percent(50), Length.Percent(50));
+
+            var heart = new VisualElement();
+            heart.style.width = 244;
+            heart.style.height = 216;
+            heart.style.backgroundRepeat = new StyleBackgroundRepeat(new BackgroundRepeat(Repeat.NoRepeat, Repeat.NoRepeat));
+            heart.style.backgroundSize = new StyleBackgroundSize(new BackgroundSize(BackgroundSizeType.Contain));
+            heart.style.backgroundPositionX = new StyleBackgroundPosition(new BackgroundPosition(BackgroundPositionKeyword.Center));
+            heart.style.backgroundPositionY = new StyleBackgroundPosition(new BackgroundPosition(BackgroundPositionKeyword.Center));
+            heart.style.backgroundImage = new StyleBackground(CardSprites.Image("Heart/heart_0"));
+            card.Add(heart);
+
+            var lbl = new Label(msg);
+            lbl.style.color = new StyleColor(new Color(0.98f, 0.85f, 0.5f));
+            lbl.style.fontSize = 22;
+            lbl.style.unityFontStyleAndWeight = FontStyle.Bold;
+            lbl.style.unityTextAlign = TextAnchor.MiddleCenter;
+            lbl.style.whiteSpace = WhiteSpace.Normal;
+            lbl.style.marginTop = 6;
+            card.Add(lbl);
+
+            overlay.Add(card);
+            FxAdd(overlay);
+
+            Tween(card, 200, tt =>
+            {
+                float e = 1f - (1f - tt) * (1f - tt);
+                float sc = Mathf.Lerp(0.7f, 1f, e);
+                card.style.scale = new Scale(new Vector3(sc, sc, 1f));
+            });
+
+            void Finish()
+            {
+                FxRemove(overlay);
+                combatFlashing = false;
+                done?.Invoke();
+            }
+
+            float startMs = Time.realtimeSinceStartup * 1000f;
+            int lastFr = -1;
+            IVisualElementScheduledItem item = null;
+            item = overlay.schedule.Execute(() =>
+            {
+                float el = Time.realtimeSinceStartup * 1000f - startMs;
+                float tf = Mathf.Clamp01(el / HeartFramesMs);
+                int fr = Mathf.Min(HeartFrames - 1, (int)(tf * HeartFrames));
+                if (fr != lastFr)
+                {
+                    heart.style.backgroundImage = new StyleBackground(CardSprites.Image($"Heart/heart_{fr}"));
+                    lastFr = fr;
+                }
+                if (el >= HeartFramesMs + HeartHoldMs)
+                {
+                    item.Pause();
+                    if (string.IsNullOrEmpty(buttonLabel))
+                    {
+                        Finish(); // sin botón (p. ej. entre corazones del Rey): continúa solo
+                    }
+                    else
+                    {
+                        // Botón para volver al mapa: la transición no es brusca.
+                        var btn = new Button(Finish) { text = buttonLabel };
+                        btn.style.marginTop = 12;
+                        btn.style.paddingLeft = 16; btn.style.paddingRight = 16;
+                        btn.style.paddingTop = 8; btn.style.paddingBottom = 8;
+                        btn.style.fontSize = 15;
+                        btn.style.unityFontStyleAndWeight = FontStyle.Bold;
+                        btn.style.color = new StyleColor(new Color(0.10f, 0.08f, 0.06f));
+                        btn.style.backgroundColor = new StyleColor(new Color(0.95f, 0.8f, 0.35f));
+                        btn.style.borderTopLeftRadius = 8; btn.style.borderTopRightRadius = 8;
+                        btn.style.borderBottomLeftRadius = 8; btn.style.borderBottomRightRadius = 8;
+                        card.Add(btn);
+                    }
+                }
+            }).Every(16);
+        }
+
         void FxAdd(VisualElement e)
         {
             fxRoot.style.display = DisplayStyle.Flex;
