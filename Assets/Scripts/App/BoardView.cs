@@ -41,6 +41,13 @@ namespace ElViaje.App
         Vector2 dragStart, offsetStart;
         bool geomHooked, lastPortrait;
 
+        // Personaje animado sobre el tablero.
+        const float HeroW = 66f, HeroH = 84f, HeroFootPad = 24f;
+        const float MoveDurationPerTileMs = 300f; // velocidad de desplazamiento por casilla
+        VisualElement heroEl;
+        bool walking;
+        int heroFrame;
+
         // Callbacks (los conecta GameApp)
         public Action<string> OnSelectCard;
         public Action<int, int> OnPlace;
@@ -356,18 +363,12 @@ namespace ElViaje.App
 
                 if (isParty)
                 {
+                    // Casilla actual: borde dorado (el sprite del personaje va encima).
                     box.style.borderTopWidth = 3;
                     box.style.borderBottomWidth = 3;
                     box.style.borderLeftWidth = 3;
                     box.style.borderRightWidth = 3;
                     SetBorderColor(box, Highlight);
-                    var hero = new Label("★");
-                    hero.style.color = new StyleColor(Highlight);
-                    hero.style.fontSize = 14;
-                    hero.style.position = Position.Absolute;
-                    hero.style.bottom = 0;
-                    hero.style.right = 2;
-                    box.Add(hero);
                 }
                 else if (isStep)
                 {
@@ -382,7 +383,7 @@ namespace ElViaje.App
                     mark.style.fontSize = 22;
                     mark.style.unityFontStyleAndWeight = FontStyle.Bold;
                     box.Add(mark);
-                    box.RegisterCallback<ClickEvent>(_ => OnStep?.Invoke(x, y));
+                    box.RegisterCallback<ClickEvent>(_ => RequestStep(x, y));
                 }
                 return box;
             }
@@ -398,7 +399,7 @@ namespace ElViaje.App
             }
             if (isStep)
             {
-                var b = new Button(() => OnStep?.Invoke(x, y)) { text = "•" };
+                var b = new Button(() => RequestStep(x, y)) { text = "•" };
                 Size(b);
                 b.style.backgroundColor = new StyleColor(Step);
                 b.style.color = new StyleColor(Ink);
@@ -502,6 +503,7 @@ namespace ElViaje.App
             content.style.position = Position.Absolute;
             content.Add(BoardGrid(s));
             viewport.Add(content);
+            AddHero(s); // personaje animado (idle) sobre la casilla del Party
 
             viewport.RegisterCallback<PointerDownEvent>(e =>
             {
@@ -546,6 +548,99 @@ namespace ElViaje.App
             float py = ((s.Party.Y - gridMinY) + 0.5f) * cell;
             boardOffset = new Vector2(vb.width / 2f - px * boardScale, vb.height / 2f - py * boardScale);
             ApplyBoardTransform();
+        }
+
+        // -------------------------------------------------------------------
+        // Personaje: idle continuo + caminar casilla por casilla (solo visual).
+        // -------------------------------------------------------------------
+        (float x, float y) CellCenter(int x, int y)
+        {
+            const float cell = 64f;
+            return (((x - gridMinX) + 0.5f) * cell, ((y - gridMinY) + 0.5f) * cell);
+        }
+
+        string HeroPrefix(GameState s)
+            => (s.Party.Members.Count > 0 && s.Party.Members[0].CardId == "inicial-heroina") ? "mago" : "cab";
+
+        static void SetHeroFrame(VisualElement el, Texture2D tex)
+        {
+            if (tex == null) return;
+            el.style.backgroundImage = new StyleBackground(tex);
+            el.style.backgroundRepeat = new StyleBackgroundRepeat(new BackgroundRepeat(Repeat.NoRepeat, Repeat.NoRepeat));
+            el.style.backgroundSize = new StyleBackgroundSize(new BackgroundSize(BackgroundSizeType.Contain));
+            el.style.backgroundPositionX = new StyleBackgroundPosition(new BackgroundPosition(BackgroundPositionKeyword.Center));
+            el.style.backgroundPositionY = new StyleBackgroundPosition(new BackgroundPosition(BackgroundPositionKeyword.Bottom));
+        }
+
+        void PlaceHeroAt(float cx, float cy)
+        {
+            heroEl.style.left = cx - HeroW / 2f;
+            heroEl.style.top = cy - HeroH + HeroFootPad;
+        }
+
+        void AddHero(GameState s)
+        {
+            if (content == null || s.Party.Members.Count == 0) return;
+            walking = false;
+            heroFrame = 0;
+            string prefix = HeroPrefix(s);
+
+            heroEl = new VisualElement();
+            heroEl.pickingMode = PickingMode.Ignore; // no bloquea el clic de las casillas
+            heroEl.style.position = Position.Absolute;
+            heroEl.style.width = HeroW;
+            heroEl.style.height = HeroH;
+            heroEl.style.transformOrigin = new TransformOrigin(Length.Percent(50), Length.Percent(50));
+            var (cx, cy) = CellCenter(s.Party.X, s.Party.Y);
+            PlaceHeroAt(cx, cy);
+            SetHeroFrame(heroEl, CardSprites.Image($"Hero/{prefix}_idle_0"));
+            content.Add(heroEl);
+
+            var el = heroEl;
+            el.schedule.Execute(() =>
+            {
+                if (walking) return;
+                heroFrame = (heroFrame + 1) % 4;
+                SetHeroFrame(el, CardSprites.Image($"Hero/{prefix}_idle_{heroFrame}"));
+            }).Every(180);
+        }
+
+        // Clic en una casilla-destino: camina (visual) y luego aplica el paso.
+        void RequestStep(int x, int y)
+        {
+            if (walking) return;
+            if (heroEl == null || current == null) { OnStep?.Invoke(x, y); return; }
+            AnimateWalk(current.Party.X, current.Party.Y, x, y, () => OnStep?.Invoke(x, y));
+        }
+
+        void AnimateWalk(int fromX, int fromY, int toX, int toY, Action done)
+        {
+            walking = true;
+            string prefix = HeroPrefix(current);
+            int dx = toX - fromX, dy = toY - fromY;
+            bool horizontal = dx != 0;
+            bool mirror = dx > 0;                    // derecha = espejo de "izquierda"
+            string anim = horizontal ? "left" : "down"; // arriba reutiliza "down"
+            heroEl.style.scale = new Scale(new Vector3(mirror ? -1f : 1f, 1f, 1f));
+
+            var (fx, fy) = CellCenter(fromX, fromY);
+            var (tx, ty) = CellCenter(toX, toY);
+            float startMs = Time.realtimeSinceStartup * 1000f;
+            var el = heroEl;
+            IVisualElementScheduledItem item = null;
+            item = el.schedule.Execute(() =>
+            {
+                float t = Mathf.Clamp01((Time.realtimeSinceStartup * 1000f - startMs) / MoveDurationPerTileMs);
+                PlaceHeroAt(Mathf.Lerp(fx, tx, t), Mathf.Lerp(fy, ty, t));
+                int fr = Mathf.Min(7, (int)(t * 8));
+                SetHeroFrame(el, CardSprites.Image($"Hero/{prefix}_{anim}_{fr}"));
+                if (t >= 1f)
+                {
+                    item.Pause();
+                    walking = false;
+                    done?.Invoke();
+                }
+            }).Every(16);
         }
 
         Label SmallLabel(string t)
@@ -1036,11 +1131,11 @@ namespace ElViaje.App
         {
             var l = new Label(t);
             l.style.color = new StyleColor(InkDark);
-            l.style.fontSize = 26;
+            l.style.fontSize = 21;
             l.style.unityFontStyleAndWeight = FontStyle.Bold;
             l.style.unityTextAlign = TextAnchor.MiddleCenter;
             l.style.whiteSpace = WhiteSpace.Normal;
-            l.style.letterSpacing = 3;
+            l.style.letterSpacing = 2;
             return l;
         }
 
@@ -1068,12 +1163,12 @@ namespace ElViaje.App
             {
                 var power = new Label($"⚔ {Engine.GetPartyPower(s)}");
                 power.style.color = new StyleColor(InkDark);
-                power.style.fontSize = 26;
+                power.style.fontSize = 21;
                 power.style.unityFontStyleAndWeight = FontStyle.Bold;
                 power.style.marginTop = 6;
                 col.Add(power);
 
-                var cap = Para("Poder total del Party", 10, InkMuted);
+                var cap = Para("Poder total del Party", 9, InkMuted);
                 cap.style.marginBottom = 10;
                 col.Add(cap);
 
@@ -1085,7 +1180,7 @@ namespace ElViaje.App
                     "y derrota al Rey Demonio.",
                 })
                 {
-                    var f = Para(frase, 10, InkMuted);
+                    var f = Para(frase, 9, InkMuted);
                     f.style.marginBottom = 0;
                     col.Add(f);
                 }
@@ -1094,7 +1189,7 @@ namespace ElViaje.App
             {
                 var count = new Label($"{s.GeneralsDefeated} / 4");
                 count.style.color = new StyleColor(InkDark);
-                count.style.fontSize = 32;
+                count.style.fontSize = 26;
                 count.style.unityFontStyleAndWeight = FontStyle.Bold;
                 count.style.marginTop = 8;
                 col.Add(count);
@@ -1117,8 +1212,8 @@ namespace ElViaje.App
                 {
                     bool center = r == 0 && c == 0;
                     var cell = new Label(center ? "♥" : (Mathf.Abs(r) + Mathf.Abs(c)).ToString());
-                    cell.style.width = 20;
-                    cell.style.fontSize = 15;
+                    cell.style.width = 18;
+                    cell.style.fontSize = 13;
                     cell.style.unityTextAlign = TextAnchor.MiddleCenter;
                     cell.style.color = new StyleColor(center ? new Color(0.72f, 0.15f, 0.15f) : InkMuted);
                     row.Add(cell);
@@ -1169,13 +1264,13 @@ namespace ElViaje.App
 
             var n = new Label(Cards.RegionLabel(region));
             n.style.color = new StyleColor(bonus > 0 ? InkDark : InkMuted);
-            n.style.fontSize = 13;
+            n.style.fontSize = 11;
             n.style.flexGrow = 1;
             row.Add(n);
 
             var v = new Label("+" + bonus);
             v.style.color = new StyleColor(bonus > 0 ? InkDark : InkMuted);
-            v.style.fontSize = 13;
+            v.style.fontSize = 11;
             if (bonus > 0) v.style.unityFontStyleAndWeight = FontStyle.Bold;
             row.Add(v);
             return row;
@@ -1200,7 +1295,7 @@ namespace ElViaje.App
                 case "bonos":
                     foreach (var region in Cards.Regions)
                         col.Add(BonusRow(region, s.VillageBonus[region]));
-                    var bfoot = Para("Los Pueblos otorgan +1 o +2 Poder a los Héroes de su región (§22).", 10, InkMuted, center: false);
+                    var bfoot = Para("Los Pueblos otorgan +1 o +2 Poder a los Héroes de su región (§22).", 9, InkMuted, center: false);
                     bfoot.style.marginTop = 8;
                     col.Add(bfoot);
                     break;
@@ -1222,20 +1317,20 @@ namespace ElViaje.App
 
                         var t = new Label($"General {i + 1} · Poder {p}");
                         t.style.color = new StyleColor(InkDark);
-                        t.style.fontSize = 11;
+                        t.style.fontSize = 10;
                         t.style.unityFontStyleAndWeight = FontStyle.Bold;
                         block.Add(t);
 
                         string prox = i == next ? "Próximo · " : "";
                         var sub = new Label($"{prox}● {fc.Label} · {fc.Attempts} intentos");
                         sub.style.color = new StyleColor(TierColor(fc.Tier));
-                        sub.style.fontSize = 9;
+                        sub.style.fontSize = 8;
                         sub.style.whiteSpace = WhiteSpace.Normal;
                         block.Add(sub);
 
                         col.Add(block);
                     }
-                    var gfoot = Para("Iguala o supera su Poder para tener más intentos.", 9, InkMuted, center: false);
+                    var gfoot = Para("Iguala o supera su Poder para tener más intentos.", 8, InkMuted, center: false);
                     gfoot.style.marginTop = 4;
                     col.Add(gfoot);
                     break;
@@ -1245,8 +1340,8 @@ namespace ElViaje.App
                     int start = Math.Max(0, s.Log.Count - 16);
                     for (int i = start; i < s.Log.Count; i++)
                     {
-                        var l = Para("• " + s.Log[i].Text, 10, InkDark, center: false);
-                        l.style.marginBottom = 4;
+                        var l = Para("• " + s.Log[i].Text, 9, InkDark, center: false);
+                        l.style.marginBottom = 3;
                         col.Add(l);
                     }
                     break;
@@ -1267,13 +1362,13 @@ namespace ElViaje.App
 
             var n = new Label(name);
             n.style.color = new StyleColor(InkDark);
-            n.style.fontSize = 13;
+            n.style.fontSize = 11;
             n.style.flexGrow = 1;
             row.Add(n);
 
             var v = new Label(value);
             v.style.color = new StyleColor(InkDark);
-            v.style.fontSize = 13;
+            v.style.fontSize = 11;
             v.style.unityFontStyleAndWeight = FontStyle.Bold;
             row.Add(v);
             return row;
