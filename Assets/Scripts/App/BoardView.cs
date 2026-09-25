@@ -15,7 +15,7 @@ namespace ElViaje.App
     public class BoardView
     {
         const int CELL = 62;
-        const int COMBAT_CELL = 26;
+        int combatCell = 26; // tamaño de celda del minijuego (adaptable al tamaño de rejilla)
 
         readonly VisualElement root;
         readonly GameController controller;
@@ -61,6 +61,10 @@ namespace ElViaje.App
         public bool Muted;
         public bool HasSave;
         public Action OnContinue;
+        public float Volume = 1f;
+        public Action<float> OnSetVolume;
+
+        bool menuOpen, settingsOpen;
 
         public void Refresh() => ReRender();
 
@@ -167,64 +171,49 @@ namespace ElViaje.App
             root.style.paddingTop = 6;
             root.style.paddingBottom = 6;
 
-            root.Add(TopBar(s));
-
             var go = Engine.CheckGameOver(s);
             if (go.Over)
             {
+                root.Add(TopBar(s));
                 root.Add(EndPanel(s, go));
             }
             else if (s.Phase == Phase.Combat && s.PendingCombat != null)
             {
+                root.Add(TopBar(s));
                 root.Add(CombatPanel(s));
             }
             else
             {
-                // Re-dibuja al cambiar de orientación (retrato ↔ apaisado).
-                if (!geomHooked)
-                {
-                    geomHooked = true;
-                    root.RegisterCallback<GeometryChangedEvent>(_ =>
-                    {
-                        bool p = IsPortrait();
-                        if (p != lastPortrait) { lastPortrait = p; ReRender(); }
-                    });
-                }
-                bool portrait = IsPortrait();
-                lastPortrait = portrait;
-
+                // El tablero llena toda la pantalla por detrás; los paneles flotan
+                // encima (semitransparentes) para que el terreno se vea debajo.
                 BuildViewport(s);
+                viewport.style.position = Position.Absolute;
+                viewport.style.left = 0; viewport.style.right = 0;
+                viewport.style.top = 0; viewport.style.bottom = 0;
+                root.Add(viewport);
 
-                if (portrait)
-                {
-                    // Teléfono vertical: tablero arriba, controles y mano debajo.
-                    root.Add(viewport);
-                    root.Add(Controls(s, row: true));
-                    root.Add(HandBar(s));
-                }
-                else
-                {
-                    // Apaisado: tablero + columna lateral, mano abajo.
-                    var main = new VisualElement();
-                    main.style.flexDirection = FlexDirection.Row;
-                    main.style.flexGrow = 1;
-                    main.style.marginTop = 2;
-                    main.Add(viewport);
-                    main.Add(Controls(s, row: false));
-                    root.Add(main);
-                    root.Add(HandBar(s));
-                }
+                var top = TopBar(s);
+                top.style.position = Position.Absolute;
+                top.style.left = 0; top.style.right = 0; top.style.top = 0;
+                root.Add(top);
+
+                var bottom = new VisualElement();
+                bottom.style.position = Position.Absolute;
+                bottom.style.left = 0; bottom.style.right = 0; bottom.style.bottom = 0;
+                bottom.style.alignItems = Align.Center;
+                bottom.Add(Controls(s));
+                bottom.Add(HandBar(s));
+                root.Add(bottom);
 
                 ApplyBoardTransform();
                 if (!boardInit)
-                {
-                    boardInit = true;
-                    viewport.schedule.Execute(() => CenterOnParty(s)); // tras el layout
-                }
+                    viewport.RegisterCallback<GeometryChangedEvent>(OnViewportReady);
             }
 
             if (bookOpen) root.Add(BookOverlay(s));
             if (startOpen) root.Add(StartOverlay());
+            if (menuOpen) root.Add(MenuOverlay());
+            if (settingsOpen) root.Add(SettingsOverlay());
         }
 
         void ReRender() { if (current != null) Render(current); }
@@ -252,42 +241,45 @@ namespace ElViaje.App
 
         VisualElement TopBar(GameState s)
         {
-            var bar = Row();
-            bar.style.backgroundColor = new StyleColor(Panel);
+            var bar = new VisualElement();
+            bar.style.backgroundColor = new StyleColor(new Color(0.10f, 0.08f, 0.12f, 0.72f));
             bar.style.paddingLeft = 10;
             bar.style.paddingRight = 10;
-            bar.style.paddingTop = 6;
-            bar.style.paddingBottom = 6;
-            bar.style.borderTopLeftRadius = 8;
-            bar.style.borderTopRightRadius = 8;
-            bar.style.borderBottomLeftRadius = 8;
-            bar.style.borderBottomRightRadius = 8;
+            bar.style.paddingTop = 5;
+            bar.style.paddingBottom = 5;
+            bar.style.borderBottomLeftRadius = 10;
+            bar.style.borderBottomRightRadius = 10;
 
-            var title = MakeLabel("El Viaje del Héroe", 15, Highlight);
-            title.style.marginRight = 18;
-            bar.Add(title);
-            bar.Add(MakeLabel($"Turno {s.Turn}"));
-            bar.Add(MakeLabel($"Poder: {Engine.GetPartyPower(s)}"));
-            bar.Add(MakeLabel($"Generales: {s.GeneralsDefeated}/4"));
-
-            var hint = MakeLabel(Hint(s), 12, Highlight);
+            // Fila 1: indicaciones al jugador (ocupan el encabezado) + menú (☰).
+            var top = Row();
+            top.style.flexWrap = Wrap.NoWrap;
+            top.style.alignItems = Align.Center;
+            var hint = MakeLabel(Hint(s), 14, Highlight);
             hint.style.flexGrow = 1;
-            bar.Add(hint);
+            hint.style.flexShrink = 1;
+            hint.style.whiteSpace = WhiteSpace.Normal; // se ajusta a varias líneas si hace falta
+            top.Add(hint);
+            top.Add(BurgerButton(() => { menuOpen = !menuOpen; settingsOpen = false; ReRender(); }));
+            bar.Add(top);
+
+            // Fila 2: música + zoom + centrar (controles a la derecha).
+            var row2 = Row();
+            row2.style.flexWrap = Wrap.NoWrap;
+            row2.style.justifyContent = Justify.FlexEnd;
+            row2.style.marginTop = 4;
 
             var music = NavButton("♪", () => OnToggleMute?.Invoke());
             music.style.opacity = Muted ? 0.35f : 1f;
-            bar.Add(music);
-
-            bar.Add(NavButton("－", () => Zoom(1f / 1.2f)));
+            row2.Add(music);
+            row2.Add(NavButton("－", () => Zoom(1f / 1.2f)));
             var zoomLbl = MakeLabel($"{Mathf.RoundToInt(boardScale / DefaultZoom * 100)}%", 11);
             zoomLbl.style.marginLeft = 4;
             zoomLbl.style.marginRight = 4;
-            bar.Add(zoomLbl);
-            bar.Add(NavButton("＋", () => Zoom(1.2f)));
-            bar.Add(NavButton("⊙", () => { if (current != null) CenterOnParty(current); }));
+            row2.Add(zoomLbl);
+            row2.Add(NavButton("＋", () => Zoom(1.2f)));
+            row2.Add(NavButton("⊙", () => { if (current != null) CenterOnParty(current); }));
+            bar.Add(row2);
 
-            var nueva = MakeButton("Nueva partida", () => OnNewGame?.Invoke());
-            bar.Add(nueva);
             return bar;
         }
 
@@ -463,6 +455,33 @@ namespace ElViaje.App
             }
         }
 
+        // Botón de menú (tres barras dibujadas, sin depender de un glyph).
+        Button BurgerButton(Action onClick)
+        {
+            var b = new Button(() => onClick());
+            b.style.width = 38;
+            b.style.height = 30;
+            b.style.flexDirection = FlexDirection.Column;
+            b.style.justifyContent = Justify.SpaceBetween;
+            b.style.marginLeft = 3;
+            b.style.paddingLeft = 8; b.style.paddingRight = 8;
+            b.style.paddingTop = 7; b.style.paddingBottom = 7;
+            b.style.backgroundColor = new StyleColor(Panel);
+            b.style.borderTopLeftRadius = 6; b.style.borderTopRightRadius = 6;
+            b.style.borderBottomLeftRadius = 6; b.style.borderBottomRightRadius = 6;
+            for (int i = 0; i < 3; i++)
+            {
+                var line = new VisualElement();
+                line.style.height = 3;
+                line.style.width = Length.Percent(100);
+                line.style.backgroundColor = new StyleColor(new Color(0.85f, 0.28f, 0.22f));
+                line.style.borderTopLeftRadius = 2; line.style.borderTopRightRadius = 2;
+                line.style.borderBottomLeftRadius = 2; line.style.borderBottomRightRadius = 2;
+                b.Add(line);
+            }
+            return b;
+        }
+
         Button NavButton(string glyph, Action onClick)
         {
             var b = new Button(() => onClick()) { text = glyph };
@@ -535,6 +554,66 @@ namespace ElViaje.App
             boardScale = Mathf.Clamp(boardScale * factor, 0.4f, 2.5f);
             ApplyBoardTransform();
             ReRender(); // refresca el % mostrado en la barra
+        }
+
+        // Centra el tablero cuando el viewport ya tiene tamaño (tras el primer layout).
+        void OnViewportReady(GeometryChangedEvent e)
+        {
+            if (boardInit || viewport == null) return;
+            var vb = viewport.layout;
+            if (float.IsNaN(vb.width) || vb.width <= 1f) return;
+            boardInit = true;
+            boardScale = Compact ? DefaultZoom * 0.4f : DefaultZoom; // teléfono arranca al 40%
+            if (current != null) CenterOnParty(current);
+            viewport.UnregisterCallback<GeometryChangedEvent>(OnViewportReady);
+            ReRender(); // refresca el % de zoom mostrado
+        }
+
+        // Teléfono / pantalla estrecha: orientación vertical.
+        static bool Compact => Screen.height > Screen.width;
+
+        // Dimensiona 'el' manteniendo su aspecto, ajustándolo dentro del contenedor.
+        // El libro ocupa un % del ancho disponible (con tope) y su alto se deriva
+        // de su proporción. Fiable: el ancho lo resuelve el layout, no una medición.
+        void FitByWidth(VisualElement el, float aspect, float widthPct, float maxW)
+        {
+            el.style.width = Length.Percent(widthPct);
+            el.style.maxWidth = maxW;
+            void SetH()
+            {
+                float w = el.resolvedStyle.width;
+                if (w > 1f && !float.IsNaN(w)) el.style.height = w / aspect;
+            }
+            el.RegisterCallback<GeometryChangedEvent>(_ => SetH());
+            SetH();
+        }
+
+        // Permite desplazar un ScrollView arrastrando con el dedo o el ratón
+        // (para móvil, donde ocultamos la barra de scroll).
+        void EnableDragScroll(ScrollView sv)
+        {
+            bool dragging = false;
+            float startY = 0f, startOffset = 0f;
+            sv.RegisterCallback<PointerDownEvent>(e =>
+            {
+                dragging = true;
+                startY = e.position.y;
+                startOffset = sv.scrollOffset.y;
+                sv.CapturePointer(e.pointerId);
+            });
+            sv.RegisterCallback<PointerMoveEvent>(e =>
+            {
+                if (!dragging) return;
+                var off = sv.scrollOffset;
+                off.y = startOffset - (e.position.y - startY);
+                sv.scrollOffset = off;
+            });
+            sv.RegisterCallback<PointerUpEvent>(e =>
+            {
+                dragging = false;
+                if (sv.HasPointerCapture(e.pointerId)) sv.ReleasePointer(e.pointerId);
+            });
+            sv.RegisterCallback<PointerCaptureOutEvent>(_ => dragging = false);
         }
 
         // Centra el Party en el viewport (cell = 62 + 2 de margen = 64).
@@ -655,45 +734,38 @@ namespace ElViaje.App
             return l;
         }
 
-        // Controles: libro, dado, mazo y "Terminar turno".
-        // row=false → columna lateral (apaisado); row=true → barra horizontal (retrato).
-        VisualElement Controls(GameState s, bool row)
+        // Panel de controles (horizontal): libro (grande) · mazo · dado · terminar.
+        VisualElement Controls(GameState s)
         {
-            var c = new VisualElement();
-            c.style.flexDirection = row ? FlexDirection.Row : FlexDirection.Column;
-            c.style.alignItems = Align.Center;
-            c.style.justifyContent = Justify.Center;
-            if (row) { c.style.height = 116; c.style.marginTop = 2; }
-            else { c.style.width = 118; c.style.paddingTop = 4; c.style.justifyContent = Justify.FlexStart; }
+            bool cmp = Compact;
+            float bookW = cmp ? 72 : 132, bookH = cmp ? 64 : 116;
+            float dieSz = cmp ? 46 : 72;
+            float gap = cmp ? 6 : 16;
 
-            void Gap(VisualElement e, bool first)
-            {
-                if (first) return;
-                if (row) e.style.marginLeft = 14;
-                else e.style.marginTop = 10;
-            }
+            var c = new VisualElement();
+            c.style.flexDirection = FlexDirection.Row;
+            c.style.alignItems = Align.Center;
+            c.style.flexWrap = Wrap.NoWrap;
+            c.style.height = cmp ? 92 : 128;
+            c.style.marginTop = 2;
+            c.style.paddingLeft = 4; c.style.paddingRight = 4;
+            c.style.backgroundColor = new StyleColor(new Color(0.10f, 0.08f, 0.07f, 0.45f));
+            c.style.borderTopLeftRadius = 10; c.style.borderTopRightRadius = 10;
+            c.style.borderBottomLeftRadius = 10; c.style.borderBottomRightRadius = 10;
+            if (cmp) { c.style.width = Length.Percent(100); c.style.justifyContent = Justify.SpaceAround; }
+            else c.style.justifyContent = Justify.Center;
+
+            void Gap(VisualElement e, bool first) { if (!cmp && !first) e.style.marginLeft = gap; }
 
             // Libro
             var book = new Button(() => { bookOpen = !bookOpen; ReRender(); });
-            book.style.width = 72;
-            book.style.height = 72;
+            book.style.width = bookW;
+            book.style.height = bookH;
             book.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
             NoBorder(book);
             CardSprites.ApplyImageContain(book, "book-closed");
             Gap(book, true);
             c.Add(book);
-
-            // Dado
-            bool canRoll = s.Phase == Phase.Roll;
-            var die = new Button(() => { if (canRoll) OnRoll?.Invoke(); });
-            die.style.width = 64;
-            die.style.height = 64;
-            die.style.opacity = canRoll ? 1f : 0.4f;
-            die.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
-            NoBorder(die);
-            CardSprites.ApplyImageContain(die, "die");
-            Gap(die, false);
-            c.Add(die);
 
             // Mazo (apilado)
             bool canDraw = s.Phase == Phase.Draw && !Engine.IsPossessed(s);
@@ -701,10 +773,24 @@ namespace ElViaje.App
             Gap(deck, false);
             c.Add(deck);
 
+            // Dado
+            bool canRoll = s.Phase == Phase.Roll;
+            var die = new Button(() => { if (canRoll) OnRoll?.Invoke(); });
+            die.style.width = dieSz;
+            die.style.height = dieSz;
+            die.style.opacity = canRoll ? 1f : 0.4f;
+            die.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
+            NoBorder(die);
+            CardSprites.ApplyImageContain(die, "die");
+            Gap(die, false);
+            c.Add(die);
+
             // Terminar turno: siempre visible, activo solo al moverse.
             bool canEnd = s.Phase == Phase.Move;
-            var end = MakeButton("Terminar turno", () => { if (canEnd) OnEndMove?.Invoke(); });
+            var end = MakeButton(cmp ? "Terminar" : "Terminar turno", () => { if (canEnd) OnEndMove?.Invoke(); });
             end.style.opacity = canEnd ? 1f : 0.4f;
+            end.style.fontSize = cmp ? 12 : 14;
+            if (cmp) { end.style.paddingLeft = 8; end.style.paddingRight = 8; }
             if (canEnd) end.style.backgroundColor = new StyleColor(new Color(0.55f, 0.16f, 0.16f));
             Gap(end, false);
             c.Add(end);
@@ -723,7 +809,7 @@ namespace ElViaje.App
         // Mazo apilado: varias cartas con el dorso, desplazadas 2px arriba-derecha.
         Button DeckCard(int count, bool active)
         {
-            const int cw = 74, ch = 100;
+            int cw = Compact ? 46 : 74, ch = Compact ? 64 : 100;
             int layers = Mathf.Clamp(count / 12 + 1, 1, 5);
             int span = (layers - 1) * 2;
 
@@ -806,7 +892,7 @@ namespace ElViaje.App
             wrap.style.justifyContent = Justify.Center;
             wrap.style.alignItems = Align.FlexEnd;
             wrap.style.alignSelf = Align.Center; // la caja mide solo lo que ocupan las cartas
-            wrap.style.height = 122;
+            wrap.style.height = Compact ? 100 : 122;
             wrap.style.marginTop = 0;
 
             bool stuck = controller.LegalMoves().Exists(m => m.Type == ActionType.Discard);
@@ -837,8 +923,9 @@ namespace ElViaje.App
                 else if (stuck) OnDiscard?.Invoke(id);
                 else OnSelectCard?.Invoke(id);
             });
-            b.style.width = 82;
-            b.style.height = 114;
+            bool cmp = Compact;
+            b.style.width = cmp ? 66 : 82;
+            b.style.height = cmp ? 92 : 114;
             b.style.paddingLeft = 3;
             b.style.paddingRight = 3;
             b.style.paddingTop = 3;
@@ -856,8 +943,8 @@ namespace ElViaje.App
             SetBorderColor(b, sel ? new Color(1f, 0.85f, 0.4f) : new Color(0, 0, 0, 0.5f));
 
             var art = new VisualElement();
-            art.style.width = 74;
-            art.style.height = 74;
+            art.style.width = cmp ? 58 : 74;
+            art.style.height = cmp ? 58 : 74;
             if (!ApplyCardArt(art, card.Kind, card.Region, card.Connections))
                 art.style.backgroundColor = new StyleColor(KindColor(card.Kind));
             b.Add(art);
@@ -905,135 +992,299 @@ namespace ElViaje.App
             return b;
         }
 
-        // Botón de elección (dificultad / héroe): título a la izq, detalle a la der.
-        Button StartChoice(string title, string sub, bool selected, Action onClick)
-        {
-            var b = new Button(() => onClick());
-            b.style.flexDirection = FlexDirection.Row;
-            b.style.justifyContent = Justify.SpaceBetween;
-            b.style.alignItems = Align.Center;
-            b.style.width = 220;
-            b.style.marginTop = 5;
-            b.style.paddingLeft = 10;
-            b.style.paddingRight = 10;
-            b.style.paddingTop = 6;
-            b.style.paddingBottom = 6;
-            b.style.backgroundColor = new StyleColor(selected ? new Color(0.85f, 0.55f, 0.2f, 0.35f) : new Color(0, 0, 0, 0.06f));
-            b.style.borderTopWidth = 2;
-            b.style.borderBottomWidth = 2;
-            b.style.borderLeftWidth = 2;
-            b.style.borderRightWidth = 2;
-            SetBorderColor(b, selected ? Highlight : new Color(0, 0, 0, 0));
-            b.style.borderTopLeftRadius = 6;
-            b.style.borderTopRightRadius = 6;
-            b.style.borderBottomLeftRadius = 6;
-            b.style.borderBottomRightRadius = 6;
-
-            var n = new Label(title);
-            n.style.color = new StyleColor(InkDark);
-            n.style.fontSize = 13;
-            n.style.unityFontStyleAndWeight = FontStyle.Bold;
-            b.Add(n);
-            var d = new Label(sub);
-            d.style.color = new StyleColor(InkMuted);
-            d.style.fontSize = 10;
-            b.Add(d);
-            return b;
-        }
-
         // -------------------------------------------------------------------
         // Pantalla de inicio (libro abierto: dificultad → elección de héroe)
         // -------------------------------------------------------------------
         VisualElement StartOverlay()
         {
+            bool cmp = Compact;
             var overlay = new VisualElement();
             overlay.style.position = Position.Absolute;
             overlay.style.left = 0;
             overlay.style.right = 0;
             overlay.style.top = 0;
             overlay.style.bottom = 0;
-            overlay.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0.6f));
             overlay.style.justifyContent = Justify.Center;
             overlay.style.alignItems = Align.Center;
+            overlay.style.backgroundColor = new StyleColor(new Color(0.06f, 0.05f, 0.07f));
+            CardSprites.ApplyMesa(overlay); // fondo de madera opaco (tapa la partida en curso)
+
+            var tint = new VisualElement();
+            tint.style.position = Position.Absolute;
+            tint.style.left = 0; tint.style.right = 0; tint.style.top = 0; tint.style.bottom = 0;
+            tint.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0.35f));
+            tint.pickingMode = PickingMode.Ignore;
+            overlay.Add(tint);
 
             var book = new VisualElement();
-            book.style.width = 840;
-            book.style.height = 560;
             CardSprites.ApplyImageContain(book, "book-open-plain");
+            book.style.overflow = Overflow.Hidden; // el contenido nunca se sale del libro
             overlay.Add(book);
+            // En móvil el libro llena el ancho (sin tope); en escritorio se limita.
+            FitByWidth(book, 1536f / 1024f, cmp ? 98f : 96f, cmp ? 3000f : 880f);
+
+            // Las fuentes se dimensionan como fracción del ancho REAL del libro, para que
+            // el texto sea la misma proporción en cualquier pantalla (iPad, S9, escritorio),
+            // sin depender del modo de escalado del PanelSettings ni del aspect ratio.
+            var fontAppliers = new List<Action<float>>();
 
             var pages = new VisualElement();
             pages.style.position = Position.Absolute;
             pages.style.left = Length.Percent(11);
-            pages.style.top = Length.Percent(13);
+            pages.style.top = Length.Percent(9);
             pages.style.right = Length.Percent(12);
-            pages.style.bottom = Length.Percent(30);
+            pages.style.bottom = Length.Percent(14);
             pages.style.flexDirection = FlexDirection.Row;
             book.Add(pages);
 
             var left = new VisualElement();
-            left.style.flexGrow = 1;
+            left.style.flexGrow = 1; left.style.flexBasis = 0;
             left.style.justifyContent = Justify.Center;
-            left.style.alignItems = Align.Center;
+            left.style.alignItems = Align.Stretch;
+            left.style.paddingRight = Length.Percent(3);
             pages.Add(left);
 
             var right = new VisualElement();
-            right.style.flexGrow = 1;
+            right.style.flexGrow = 1; right.style.flexBasis = 0;
             right.style.justifyContent = Justify.Center;
-            right.style.alignItems = Align.Center;
+            right.style.alignItems = Align.Stretch;
+            right.style.paddingLeft = Length.Percent(3);
             pages.Add(right);
 
-            // Página izquierda: título.
-            var title = new Label("El Viaje del Héroe");
-            title.style.color = new StyleColor(InkDark);
-            title.style.fontSize = 22;
-            title.style.unityFontStyleAndWeight = FontStyle.Bold;
-            title.style.unityTextAlign = TextAnchor.MiddleCenter;
-            title.style.whiteSpace = WhiteSpace.Normal;
-            left.Add(title);
-            left.Add(Para("Reglamento v2.1 Beta · Aventura solitario", 10, InkMuted));
+            // Etiqueta cuyo tamaño es proporcional al ancho del libro.
+            Label PLabel(string t, float ratio, float min, float max, Color col, bool bold)
+            {
+                var l = new Label(t);
+                l.style.color = new StyleColor(col);
+                l.style.whiteSpace = WhiteSpace.Normal;
+                l.style.width = Length.Percent(100);
+                l.style.unityTextAlign = TextAnchor.MiddleCenter;
+                if (bold) l.style.unityFontStyleAndWeight = FontStyle.Bold;
+                fontAppliers.Add(bw => l.style.fontSize = Mathf.Clamp(bw * ratio, min, max));
+                return l;
+            }
+
+            // Opción (dificultad / líder): nombre arriba, detalle debajo; proporcional al libro.
+            Button PChoice(string title, string sub, bool selected, Action onClick)
+            {
+                var b = new Button(() => onClick());
+                b.style.flexDirection = FlexDirection.Column;
+                b.style.justifyContent = Justify.Center;
+                b.style.alignItems = Align.Center;
+                b.style.width = Length.Percent(100);
+                b.style.marginLeft = 0; b.style.marginRight = 0; b.style.marginBottom = 0;
+                b.style.backgroundColor = new StyleColor(selected ? new Color(0.85f, 0.55f, 0.2f, 0.35f) : new Color(0, 0, 0, 0.06f));
+                b.style.borderTopWidth = 2; b.style.borderBottomWidth = 2;
+                b.style.borderLeftWidth = 2; b.style.borderRightWidth = 2;
+                SetBorderColor(b, selected ? Highlight : new Color(0, 0, 0, 0));
+                b.style.borderTopLeftRadius = 6; b.style.borderTopRightRadius = 6;
+                b.style.borderBottomLeftRadius = 6; b.style.borderBottomRightRadius = 6;
+                b.style.minHeight = 0; // sin alto mínimo del botón por defecto
+
+                var n = new Label(title);
+                n.style.color = new StyleColor(InkDark);
+                n.style.unityFontStyleAndWeight = FontStyle.Bold;
+                n.style.whiteSpace = WhiteSpace.Normal;
+                n.style.width = Length.Percent(100);
+                n.style.unityTextAlign = TextAnchor.MiddleCenter;
+                n.style.marginTop = 0; n.style.marginBottom = 0;
+                b.Add(n);
+                Label d = null;
+                if (!string.IsNullOrEmpty(sub))
+                {
+                    d = new Label(sub);
+                    d.style.color = new StyleColor(InkMuted);
+                    d.style.whiteSpace = WhiteSpace.Normal;
+                    d.style.width = Length.Percent(100);
+                    d.style.unityTextAlign = TextAnchor.MiddleCenter;
+                    b.Add(d);
+                }
+
+                fontAppliers.Add(bw =>
+                {
+                    n.style.fontSize = Mathf.Clamp(bw * 0.020f, 9, 15);
+                    float ph = Mathf.Clamp(bw * 0.007f, 2, 6);   // padding horizontal
+                    b.style.paddingTop = 1; b.style.paddingBottom = 1; // botón lo más bajo posible
+                    b.style.paddingLeft = ph; b.style.paddingRight = ph;
+                    b.style.marginTop = Mathf.Clamp(bw * 0.003f, 1, 3); // separación entre botones
+                    if (d != null)
+                    {
+                        d.style.fontSize = Mathf.Clamp(bw * 0.015f, 7, 12);
+                        d.style.marginTop = -Mathf.Clamp(bw * 0.004f, 1, 5); // junta nombre y subtítulo
+                    }
+                });
+                return b;
+            }
+
+            // ---- Página izquierda ---- (rev: dificultades sin subtexto)
+            left.Add(PLabel("El Viaje del Héroe", 0.028f, 12, 26, InkDark, true));
             if (startStep == 1 && HasSave)
             {
                 var cont = MakeButton("▶ Continuar partida", () => { startOpen = false; OnContinue?.Invoke(); }, new Color(0.55f, 0.30f, 0.12f));
-                cont.style.marginTop = 12;
+                cont.style.marginRight = 0;
+                cont.style.whiteSpace = WhiteSpace.Normal;
+                cont.style.unityTextAlign = TextAnchor.MiddleCenter;
+                fontAppliers.Add(bw =>
+                {
+                    cont.style.fontSize = Mathf.Clamp(bw * 0.016f, 9, 12);
+                    cont.style.marginTop = Mathf.Clamp(bw * 0.010f, 4, 10);
+                    float cp = Mathf.Clamp(bw * 0.007f, 2, 6);
+                    cont.style.paddingTop = cp; cont.style.paddingBottom = cp;
+                });
                 left.Add(cont);
             }
             if (startStep == 2)
             {
-                var d = Para($"Dificultad: {DiffLabel(startDiff)}", 11, InkDark);
-                d.style.marginTop = 12;
-                left.Add(d);
-                left.Add(TextButton("← Cambiar dificultad", () => { startStep = 1; RefreshStart(); }));
+                // Ancla el contenido arriba (sin el hueco de centrado) para que
+                // "Cambiar dificultad" quede visible dentro de la hoja.
+                left.style.justifyContent = Justify.FlexStart;
+                // Grupo compacto: "Dificultad: X" con "Cambiar dificultad" pegado debajo.
+                var grp = new VisualElement();
+                grp.style.alignItems = Align.Center;
+                grp.style.marginTop = 12;
+                var d = PLabel($"Dificultad: {DiffLabel(startDiff)}", 0.016f, 8, 12, InkDark, false);
+                grp.Add(d);
+                var chg = TextButton("← Cambiar dificultad", () => { startStep = 1; RefreshStart(); });
+                chg.style.marginTop = 1;
+                fontAppliers.Add(bw => chg.style.fontSize = Mathf.Clamp(bw * 0.015f, 8, 12));
+                grp.Add(chg);
+                left.Add(grp);
             }
 
-            // Página derecha: paso 1 (dificultad) o paso 2 (héroe).
+            // ---- Página derecha ----
             if (startStep == 1)
             {
-                var h = Para("Dificultad", 14, InkDark);
-                h.style.unityFontStyleAndWeight = FontStyle.Bold;
-                h.style.marginBottom = 4;
-                right.Add(h);
                 foreach (var diff in new[] { Difficulty.Facil, Difficulty.Medio, Difficulty.Dificil })
                 {
                     var dd = diff;
-                    right.Add(StartChoice(DiffLabel(dd), DiffDesc(dd), startDiff == dd, () => { startDiff = dd; RefreshStart(); }));
+                    // Clic en una dificultad → avanza directo a elegir líder (sin botón aparte).
+                    // Sin subtexto: solo el nombre de la dificultad (más compacto).
+                    right.Add(PChoice(DiffLabel(dd), "", startDiff == dd,
+                        () => { startDiff = dd; startStep = 2; RefreshStart(); }));
                 }
-                var go = MakeButton("Comenzar aventura →", () => { startStep = 2; RefreshStart(); });
-                go.style.marginTop = 12;
-                right.Add(go);
             }
             else
             {
-                var h = Para("Elige el líder del Party", 14, InkDark);
-                h.style.unityFontStyleAndWeight = FontStyle.Bold;
-                h.style.marginBottom = 4;
-                right.Add(h);
-                right.Add(StartChoice("Caballero", "Poder base 3", false,
+                // Ancla arriba para que Caballero y Mago (con su subtítulo) quepan enteros.
+                right.style.justifyContent = Justify.FlexStart;
+                right.style.paddingTop = 6;
+                right.Add(PChoice("Caballero", "Poder base 3", false,
                     () => { startOpen = false; OnStartGame?.Invoke(startDiff, Starter.Heroe); }));
-                right.Add(StartChoice("Mago", "Movilidad +1 (1d6 + 1)", false,
+                right.Add(PChoice("Mago", "Movilidad +1 (1d6 + 1)", false,
                     () => { startOpen = false; OnStartGame?.Invoke(startDiff, Starter.Heroina); }));
             }
 
+            // Aplica las fuentes cuando el libro ya tiene ancho resuelto (y en cada relayout).
+            book.RegisterCallback<GeometryChangedEvent>(_ =>
+            {
+                float bw = book.resolvedStyle.width;
+                if (bw > 1f && !float.IsNaN(bw))
+                    foreach (var a in fontAppliers) a(bw);
+            });
+
+            return overlay;
+        }
+
+        // -------------------------------------------------------------------
+        // Menú (☰) y Ajustes
+        // -------------------------------------------------------------------
+        Button MenuItem(string text, Action onClick)
+        {
+            var b = new Button(() => onClick()) { text = text };
+            b.style.width = Length.Percent(100);
+            b.style.marginTop = 4; b.style.marginBottom = 0;
+            b.style.marginLeft = 0; b.style.marginRight = 0;
+            b.style.paddingTop = 9; b.style.paddingBottom = 9;
+            b.style.paddingLeft = 12; b.style.paddingRight = 12;
+            b.style.backgroundColor = new StyleColor(new Color(0.20f, 0.18f, 0.24f));
+            b.style.color = new StyleColor(Ink);
+            b.style.fontSize = 14;
+            b.style.unityTextAlign = TextAnchor.MiddleLeft;
+            b.style.borderTopLeftRadius = 6; b.style.borderTopRightRadius = 6;
+            b.style.borderBottomLeftRadius = 6; b.style.borderBottomRightRadius = 6;
+            NoBorder(b);
+            return b;
+        }
+
+        VisualElement MenuOverlay()
+        {
+            var overlay = new VisualElement();
+            overlay.style.position = Position.Absolute;
+            overlay.style.left = 0; overlay.style.right = 0; overlay.style.top = 0; overlay.style.bottom = 0;
+            overlay.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0.35f));
+            overlay.RegisterCallback<ClickEvent>(_ => { menuOpen = false; ReRender(); });
+
+            var panel = new VisualElement();
+            panel.style.position = Position.Absolute;
+            panel.style.top = 8; panel.style.right = 8;
+            panel.style.width = 210;
+            panel.style.paddingLeft = 8; panel.style.paddingRight = 8;
+            panel.style.paddingTop = 8; panel.style.paddingBottom = 8;
+            panel.style.backgroundColor = new StyleColor(new Color(0.12f, 0.10f, 0.14f, 0.98f));
+            panel.style.borderTopLeftRadius = 10; panel.style.borderTopRightRadius = 10;
+            panel.style.borderBottomLeftRadius = 10; panel.style.borderBottomRightRadius = 10;
+            panel.style.borderTopWidth = 2; panel.style.borderBottomWidth = 2;
+            panel.style.borderLeftWidth = 2; panel.style.borderRightWidth = 2;
+            SetBorderColor(panel, new Color(0.6f, 0.45f, 0.2f));
+            panel.RegisterCallback<ClickEvent>(e => e.StopPropagation());
+
+            panel.Add(MenuItem("🗺 Nueva partida", () => { menuOpen = false; OnNewGame?.Invoke(); }));
+            panel.Add(MenuItem("⚙ Ajustes", () => { menuOpen = false; settingsOpen = true; ReRender(); }));
+
+            overlay.Add(panel);
+            return overlay;
+        }
+
+        VisualElement SettingsOverlay()
+        {
+            var overlay = new VisualElement();
+            overlay.style.position = Position.Absolute;
+            overlay.style.left = 0; overlay.style.right = 0; overlay.style.top = 0; overlay.style.bottom = 0;
+            overlay.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0.55f));
+            overlay.style.justifyContent = Justify.Center;
+            overlay.style.alignItems = Align.Center;
+            overlay.RegisterCallback<ClickEvent>(_ => { settingsOpen = false; ReRender(); });
+
+            var panel = new VisualElement();
+            panel.style.width = Length.Percent(88);
+            panel.style.maxWidth = 360;
+            panel.style.paddingLeft = 18; panel.style.paddingRight = 18;
+            panel.style.paddingTop = 16; panel.style.paddingBottom = 16;
+            panel.style.backgroundColor = new StyleColor(new Color(0.12f, 0.10f, 0.14f, 0.98f));
+            panel.style.borderTopLeftRadius = 12; panel.style.borderTopRightRadius = 12;
+            panel.style.borderBottomLeftRadius = 12; panel.style.borderBottomRightRadius = 12;
+            panel.style.borderTopWidth = 2; panel.style.borderBottomWidth = 2;
+            panel.style.borderLeftWidth = 2; panel.style.borderRightWidth = 2;
+            SetBorderColor(panel, new Color(0.6f, 0.45f, 0.2f));
+            panel.RegisterCallback<ClickEvent>(e => e.StopPropagation());
+
+            var title = MakeLabel("Ajustes", 18, Highlight);
+            title.style.marginBottom = 10;
+            panel.Add(title);
+
+            // Volumen
+            var volLbl = MakeLabel("Volumen", 13);
+            volLbl.style.marginBottom = 2;
+            panel.Add(volLbl);
+            var slider = new Slider(0f, 1f) { value = Volume };
+            slider.style.marginBottom = 12;
+            slider.RegisterValueChangedCallback(ev => { Volume = ev.newValue; OnSetVolume?.Invoke(Volume); });
+            panel.Add(slider);
+
+            // Idioma (sin función por ahora)
+            var langLbl = MakeLabel("Idioma", 13);
+            langLbl.style.marginBottom = 2;
+            panel.Add(langLbl);
+            var lang = new DropdownField(new List<string> { "Español" }, 0);
+            lang.SetEnabled(false);
+            lang.style.marginBottom = 14;
+            panel.Add(lang);
+
+            var close = MakeButton("Cerrar", () => { settingsOpen = false; ReRender(); }, Highlight);
+            close.style.alignSelf = Align.Center;
+            panel.Add(close);
+
+            overlay.Add(panel);
             return overlay;
         }
 
@@ -1053,58 +1304,62 @@ namespace ElViaje.App
             overlay.style.alignItems = Align.Center;
 
             var book = new VisualElement();
-            book.style.width = 760;
-            book.style.height = 507; // ~1536/1024
             CardSprites.ApplyImageContain(book, "book-" + bookTab);
+            book.style.overflow = Overflow.Hidden; // el contenido nunca se sale del libro
             overlay.Add(book);
+            FitByWidth(book, 1536f / 1024f, Compact ? 98f : 96f, Compact ? 3000f : 820f);
 
-            // Pestañas: banda a la derecha del libro (zonas clicables invisibles).
+            var tune = bookTune[bookTab];
+
+            // Pestañas: banda a la derecha del libro (zonas clicables sobre las pestañas impresas).
             var tabs = new VisualElement();
             tabs.style.position = Position.Absolute;
             tabs.style.right = Length.Percent(2);
-            tabs.style.top = Length.Percent(16);
-            tabs.style.bottom = Length.Percent(35);
-            tabs.style.width = Length.Percent(18);
+            tabs.style.top = Length.Percent(10);
             tabs.style.flexDirection = FlexDirection.Column;
+            tabs.style.width = Length.Percent(tune.tw);
+            tabs.style.height = Length.Percent(tune.th);
             foreach (var id in new[] { "party", "bonos", "generales", "historia" })
             {
                 string tid = id;
                 var tb = new Button(() => { bookTab = tid; ReRender(); }) { text = "" };
                 tb.style.flexGrow = 1;
+                tb.style.minHeight = 0; // permite bandas de pestañas más bajas
                 tb.style.marginTop = 0;
                 tb.style.marginBottom = 0;
                 tb.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0));
-                tb.style.borderTopWidth = 0;
-                tb.style.borderBottomWidth = 0;
-                tb.style.borderLeftWidth = 0;
-                tb.style.borderRightWidth = 0;
                 tb.style.borderTopLeftRadius = 0;
                 tb.style.borderTopRightRadius = 0;
                 tb.style.borderBottomLeftRadius = 0;
                 tb.style.borderBottomRightRadius = 0;
+                tb.style.borderTopWidth = 0; tb.style.borderBottomWidth = 0; tb.style.borderLeftWidth = 0; tb.style.borderRightWidth = 0;
                 tabs.Add(tb);
             }
             book.Add(tabs);
 
-            // Página izquierda: título (y en Party, poder + descripción).
+            // Página izquierda.
             var leftPage = new VisualElement();
             leftPage.style.position = Position.Absolute;
             leftPage.style.left = Length.Percent(12);
             leftPage.style.top = Length.Percent(15);
-            leftPage.style.right = Length.Percent(52);
-            leftPage.style.bottom = Length.Percent(22);
+            leftPage.style.width = Length.Percent(tune.lw);
+            leftPage.style.height = Length.Percent(tune.lh);
             leftPage.Add(BookLeft(s, bookTab));
             book.Add(leftPage);
 
-            // Página derecha: los datos (lista / registro).
+            // Página derecha.
             var rightPage = new VisualElement();
             rightPage.style.position = Position.Absolute;
             rightPage.style.left = Length.Percent(50);
             rightPage.style.top = Length.Percent(15);
-            rightPage.style.right = Length.Percent(23);
-            rightPage.style.bottom = Length.Percent(22);
+            rightPage.style.width = Length.Percent(tune.rw);
+            rightPage.style.height = Length.Percent(tune.rh);
             rightPage.Add(BookRight(s, bookTab));
             book.Add(rightPage);
+
+            // Tamaños de fuente y espaciado calibrados (@ ancho libro 242) escalados
+            // proporcionalmente al ancho real → se ven igual en cualquier pantalla.
+            ApplyBookTuned(book, leftPage, rightPage, tune);
 
             var close = MakeButton("✕ Cerrar", () => { bookOpen = false; ReRender(); }, new Color(0.4f, 0.1f, 0.1f));
             close.style.position = Position.Absolute;
@@ -1113,6 +1368,50 @@ namespace ElViaje.App
             overlay.Add(close);
 
             return overlay;
+        }
+
+        // ============================================================
+        // Dimensiones calibradas del libro (por pestaña). Fuentes/espaciado en px
+        // medidos a ancho de libro 242 (S9); se escalan al ancho real en ApplyBookTuned.
+        // ============================================================
+        class TabTune { public float lw, lh, rw, rh, tw, th, fH, fB, fR, mg, pd; }
+        readonly Dictionary<string, TabTune> bookTune = new()
+        {
+            { "party",     new TabTune { lw = 32, lh = 55, rw = 25, rh = 55, tw = 19, th = 10, fH = 10, fB = 6,  fR = 7, mg = 0f,   pd = 0.1f } },
+            { "bonos",     new TabTune { lw = 30, lh = 55, rw = 27, rh = 55, tw = 18, th = 10, fH = 10, fB = 12, fR = 7, mg = 0.1f, pd = 0.1f } },
+            { "generales", new TabTune { lw = 30, lh = 55, rw = 27, rh = 55, tw = 18, th = 10, fH = 8,  fB = 7,  fR = 7, mg = 0.1f, pd = 0.1f } },
+            { "historia",  new TabTune { lw = 30, lh = 55, rw = 27, rh = 55, tw = 18, th = 10, fH = 8,  fB = 7,  fR = 7, mg = 0.1f, pd = 0.1f } },
+        };
+
+        // Aplica fuentes y espaciado calibrados, escalados al ancho real del libro.
+        void ApplyBookTuned(VisualElement book, VisualElement leftPage, VisualElement rightPage, TabTune t)
+        {
+            void Apply()
+            {
+                float bw = book.resolvedStyle.width;
+                if (bw <= 1f || float.IsNaN(bw)) return;
+                float k = bw / 242f; // 242 = ancho de libro con el que se calibró (S9)
+                foreach (var l in leftPage.Query<Label>().ToList())
+                    l.style.fontSize = (l.name == "book-header" ? t.fH : t.fB) * k;
+                foreach (var l in rightPage.Query<Label>().ToList())
+                    l.style.fontSize = t.fR * k;
+                ApplyItemsSpacing(leftPage.childCount > 0 ? leftPage[0] : null, t.mg * k, t.pd * k);
+                var sv = rightPage.childCount > 0 ? rightPage[0] as ScrollView : null;
+                ApplyItemsSpacing(sv?.contentContainer, t.mg * k, t.pd * k);
+            }
+            book.RegisterCallback<GeometryChangedEvent>(_ => Apply());
+            Apply();
+        }
+
+        void ApplyItemsSpacing(VisualElement container, float mg, float pd)
+        {
+            if (container == null) return;
+            foreach (var child in container.Children())
+            {
+                child.style.marginTop = 0;
+                child.style.marginBottom = mg;
+                if (!(child is Label)) { child.style.paddingTop = pd; child.style.paddingBottom = pd; }
+            }
         }
 
         static Color InkDark => new(0.20f, 0.12f, 0.05f);
@@ -1130,6 +1429,7 @@ namespace ElViaje.App
         Label BookTitle(string t)
         {
             var l = new Label(t);
+            l.name = "book-header"; // el título usa su propio tamaño de fuente (izq.)
             l.style.color = new StyleColor(InkDark);
             l.style.fontSize = 26;
             l.style.unityFontStyleAndWeight = FontStyle.Bold;
@@ -1145,6 +1445,7 @@ namespace ElViaje.App
             l.style.color = new StyleColor(color);
             l.style.fontSize = size;
             l.style.whiteSpace = WhiteSpace.Normal;
+            l.style.width = Length.Percent(100); // ocupa el ancho de su columna (evita el corte palabra-a-palabra)
             if (center) l.style.unityTextAlign = TextAnchor.MiddleCenter;
             return l;
         }
@@ -1169,15 +1470,13 @@ namespace ElViaje.App
                 col.Add(power);
 
                 var cap = Para("Poder total del Party", 10, InkMuted);
-                cap.style.marginBottom = 10;
-                col.Add(cap);
+                cap.style.marginBottom = 5;
+                //col.Add(cap);
 
                 foreach (var frase in new[]
                 {
-                    "Coloca las cartas de tu mano sobre la mesa",
-                    "para crear tu camino del héroe.",
-                    "Visita pueblos, recluta otros héroes",
-                    "y derrota al Rey Demonio.",
+                    "Coloca las cartas de tu mano sobre la mesa para crear tu camino del héroe. Visita pueblos, recluta otros héroes y derrota al Rey Demonio.",
+
                 })
                 {
                     var f = Para(frase, 10, InkMuted);
@@ -1202,7 +1501,7 @@ namespace ElViaje.App
         VisualElement DiamondDiagram()
         {
             var wrap = new VisualElement();
-            wrap.style.marginTop = 12;
+            wrap.style.marginTop = 6;
             wrap.style.alignItems = Align.Center;
             for (int r = -2; r <= 2; r++)
             {
@@ -1212,7 +1511,7 @@ namespace ElViaje.App
                 {
                     bool center = r == 0 && c == 0;
                     var cell = new Label(center ? "♥" : (Mathf.Abs(r) + Mathf.Abs(c)).ToString());
-                    cell.style.width = 20;
+                    cell.style.width = 6;
                     cell.style.fontSize = 15;
                     cell.style.unityTextAlign = TextAnchor.MiddleCenter;
                     cell.style.color = new StyleColor(center ? new Color(0.72f, 0.15f, 0.15f) : InkMuted);
@@ -1254,7 +1553,7 @@ namespace ElViaje.App
             var dot = new VisualElement();
             dot.style.width = 11;
             dot.style.height = 11;
-            dot.style.marginRight = 7;
+            dot.style.marginRight = 3;
             dot.style.borderTopLeftRadius = 6;
             dot.style.borderTopRightRadius = 6;
             dot.style.borderBottomLeftRadius = 6;
@@ -1279,8 +1578,12 @@ namespace ElViaje.App
         // Página derecha: los datos de la pestaña.
         VisualElement BookRight(GameState s, string tab)
         {
-            var col = new ScrollView();
+            var col = new ScrollView(ScrollViewMode.Vertical);
             col.style.flexGrow = 1;
+            col.verticalScrollerVisibility = ScrollerVisibility.Hidden;
+            col.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
+            col.touchScrollBehavior = ScrollView.TouchScrollBehavior.Clamped;
+            EnableDragScroll(col);
 
             switch (tab)
             {
@@ -1315,7 +1618,7 @@ namespace ElViaje.App
                         block.style.borderBottomWidth = 1;
                         block.style.borderBottomColor = new StyleColor(new Color(0.3f, 0.2f, 0.1f, 0.30f));
 
-                        var t = new Label($"General {i + 1} · Poder {p}");
+                        var t = new Label($"General {i + 1} · P {p}");
                         t.style.color = new StyleColor(InkDark);
                         t.style.fontSize = 11;
                         t.style.unityFontStyleAndWeight = FontStyle.Bold;
@@ -1380,8 +1683,11 @@ namespace ElViaje.App
         VisualElement CombatPanel(GameState s)
         {
             var pc = s.PendingCombat;
+            // Rejillas pequeñas (4–6): celdas cómodas que caben en el arte del jefe.
+            bool cmp = Compact;
+            combatCell = pc.GridN <= 6 ? (cmp ? 30 : 48) : (cmp ? 22 : 32);
 
-            // Panel a pantalla completa con la imagen del jefe de fondo.
+            // Panel oscuro; el arte del jefe irá como recuadro detrás de la rejilla.
             var panel = new VisualElement();
             panel.style.flexGrow = 1;
             panel.style.marginTop = 8;
@@ -1390,12 +1696,10 @@ namespace ElViaje.App
             panel.style.borderTopRightRadius = 10;
             panel.style.borderBottomLeftRadius = 10;
             panel.style.borderBottomRightRadius = 10;
-            CardSprites.ApplyBoss(panel, pc.Region);
+            panel.style.backgroundColor = new StyleColor(new Color(0.09f, 0.08f, 0.11f));
 
-            // Velo oscuro para legibilidad sobre el arte.
             var scrim = new VisualElement();
             scrim.style.flexGrow = 1;
-            scrim.style.backgroundColor = new StyleColor(new Color(0f, 0f, 0f, 0.58f));
             scrim.style.alignItems = Align.Center;
             scrim.style.paddingTop = 14;
             scrim.style.paddingBottom = 14;
@@ -1404,19 +1708,22 @@ namespace ElViaje.App
             panel.Add(scrim);
 
             string title = pc.IsRey ? "¡El Rey Demonio!" : $"¡{Cards.GetCard(pc.CardId).Name}!";
-            var h = MakeLabel(title, 24, Highlight);
+            var h = MakeLabel(title, cmp ? 15 : 24, Highlight);
             h.style.marginRight = 0;
             h.style.marginBottom = 4;
             h.style.unityFontStyleAndWeight = FontStyle.Bold;
             h.style.unityTextAlign = TextAnchor.MiddleCenter;
+            h.style.whiteSpace = WhiteSpace.Normal;
+            h.style.flexShrink = 0;
             scrim.Add(h);
 
             var info = MakeLabel(
                 $"Intentos: {pc.AttemptsUsed}/{pc.AttemptsTotal}    " +
                 $"Poder {(pc.IsRey ? "Rey" : "General")}: {pc.GeneralPower}    Party: {pc.PartyPower}" +
-                (pc.IsRey ? $"    Corazones: {pc.HeartsFound}/{pc.HeartsTotal}" : ""), 12);
+                (pc.IsRey ? $"    Corazones: {pc.HeartsFound}/{pc.HeartsTotal}" : ""), cmp ? 10 : 12);
             info.style.marginRight = 0;
             info.style.unityTextAlign = TextAnchor.MiddleCenter;
+            info.style.whiteSpace = WhiteSpace.Normal;
             scrim.Add(info);
 
             // Antes del primer clic se puede retirar; después no.
@@ -1433,6 +1740,27 @@ namespace ElViaje.App
 
             var gridCol = new VisualElement();
             gridCol.style.marginTop = 8;
+            gridCol.style.position = Position.Relative;
+
+            // Recuadro con el arte del jefe DETRÁS de las casillas (coords quedan fuera).
+            int step = combatCell + 2;                 // ancho/alto de celda + márgenes
+            var bossBox = new VisualElement();
+            bossBox.style.position = Position.Absolute;
+            bossBox.style.left = step - 4;             // tras la columna de letras
+            bossBox.style.top = combatCell - 4;        // tras la fila de números
+            bossBox.style.width = pc.GridN * step + 4 + combatCell;   // margen extra der.
+            bossBox.style.height = pc.GridN * step + 4 + combatCell;  // margen extra abajo
+            bossBox.style.overflow = Overflow.Hidden;
+            bossBox.style.borderTopLeftRadius = 6; bossBox.style.borderTopRightRadius = 6;
+            bossBox.style.borderBottomLeftRadius = 6; bossBox.style.borderBottomRightRadius = 6;
+            CardSprites.ApplyBoss(bossBox, pc.Region); // cover: llena el recuadro
+            var dim = new VisualElement();
+            dim.style.position = Position.Absolute;
+            dim.style.left = 0; dim.style.right = 0; dim.style.top = 0; dim.style.bottom = 0;
+            dim.style.backgroundColor = new StyleColor(new Color(0, 0, 0, 0.28f));
+            dim.pickingMode = PickingMode.Ignore;
+            bossBox.Add(dim);
+            gridCol.Add(bossBox);
 
             // Regla superior: esquina vacía + números de columna (1..N).
             var ruler = new VisualElement();
@@ -1469,33 +1797,33 @@ namespace ElViaje.App
                         int rr = r, cc = c;
                         var b = new Button(() => OnCombatSelect?.Invoke(rr, cc)) { text = "" };
                         CombatSize(b);
-                        b.style.backgroundColor = new StyleColor(new Color(0.09f, 0.08f, 0.11f, 0.66f));
+                        b.style.backgroundColor = new StyleColor(new Color(0.09f, 0.08f, 0.11f, 0.22f));
                         rowEl.Add(b);
                     }
                 }
                 gridCol.Add(rowEl);
             }
-            scrim.Add(gridCol);
+            scrim.Add(gridCol); // rejilla pequeña: cabe sin scroll
 
             return panel;
         }
 
-        static Label CoordLabel(string text)
+        Label CoordLabel(string text)
         {
             var l = new Label(text);
-            l.style.width = COMBAT_CELL + 2;   // ancho de celda + sus márgenes
-            l.style.height = COMBAT_CELL;
+            l.style.width = combatCell + 2;   // ancho de celda + sus márgenes
+            l.style.height = combatCell;
             l.style.unityTextAlign = TextAnchor.MiddleCenter;
             l.style.color = new StyleColor(new Color(0.9f, 0.85f, 0.7f));
-            l.style.fontSize = 11;
+            l.style.fontSize = Mathf.Clamp(combatCell / 2 - 2, 9, 12);
             l.style.unityFontStyleAndWeight = FontStyle.Bold;
             return l;
         }
 
-        static void CombatSize(VisualElement e)
+        void CombatSize(VisualElement e)
         {
-            e.style.width = COMBAT_CELL;
-            e.style.height = COMBAT_CELL;
+            e.style.width = combatCell;
+            e.style.height = combatCell;
             // Borde cálido tenue para delinear la cuadrícula sobre el arte del jefe.
             e.style.borderTopWidth = 1; e.style.borderBottomWidth = 1;
             e.style.borderLeftWidth = 1; e.style.borderRightWidth = 1;
@@ -1566,44 +1894,26 @@ namespace ElViaje.App
             var paras = Chronicle.Build(s);
             Color ink = new(0.20f, 0.12f, 0.05f);
 
-            var scroll = new ScrollView();
+            // Crónica: texto a ancho completo, sin barra de scroll (se arrastra con el dedo).
+            var scroll = new ScrollView(ScrollViewMode.Vertical);
             scroll.style.flexGrow = 1;
             scroll.style.marginBottom = 12;
+            scroll.style.width = Length.Percent(100);
+            scroll.contentContainer.style.width = Length.Percent(100);
+            scroll.verticalScrollerVisibility = ScrollerVisibility.Hidden;
+            scroll.horizontalScrollerVisibility = ScrollerVisibility.Hidden;
+            scroll.touchScrollBehavior = ScrollView.TouchScrollBehavior.Clamped;
+            EnableDragScroll(scroll);
 
-            // Primer párrafo con capital "E" ilustrada (la frase empieza por "El ...").
-            if (paras.Count > 0)
-            {
-                var firstRow = new VisualElement();
-                firstRow.style.flexDirection = FlexDirection.Row;
-                firstRow.style.alignItems = Align.FlexStart;
-
-                var cap = new VisualElement();
-                cap.style.width = 66;
-                cap.style.height = 66;
-                cap.style.marginRight = 8;
-                cap.style.flexShrink = 0;
-                CardSprites.ApplyImageContain(cap, "capital-e");
-                firstRow.Add(cap);
-
-                string first = paras[0];
-                if (first.StartsWith("E")) first = first.Substring(1); // la "E" la pone la capital
-                var firstText = new Label(first);
-                firstText.style.color = new StyleColor(ink);
-                firstText.style.fontSize = 15;
-                firstText.style.whiteSpace = WhiteSpace.Normal;
-                firstText.style.flexGrow = 1;
-                firstText.style.flexShrink = 1;
-                firstRow.Add(firstText);
-                scroll.Add(firstRow);
-            }
-
-            for (int i = 1; i < paras.Count; i++)
+            for (int i = 0; i < paras.Count; i++)
             {
                 var p = new Label(paras[i]);
                 p.style.color = new StyleColor(ink);
-                p.style.fontSize = 14;
+                p.style.fontSize = i == 0 ? 15 : 14;
                 p.style.whiteSpace = WhiteSpace.Normal;
-                p.style.marginTop = 8;
+                p.style.width = Length.Percent(100);       // ocupa todo el ancho de la crónica
+                p.style.unityTextAlign = TextAnchor.UpperLeft;
+                p.style.marginTop = i == 0 ? 0 : 8;
                 scroll.Add(p);
             }
             card.Add(scroll);

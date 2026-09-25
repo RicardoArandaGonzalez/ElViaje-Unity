@@ -25,9 +25,10 @@ namespace ElViaje.Game
 
         /// <summary>+1 de Poder por cada Héroe reclutable (nueva escala).</summary>
         public const int HeroRecruitPower = 1;
-        /// <summary>Tamaño de cuadrícula de cada General (por orden) y del Rey.</summary>
-        public static readonly int[] GeneralGrids = { 8, 10, 12, 14 };
-        public const int ReyGrid = 16;
+        /// <summary>Tamaño de cuadrícula de cada General (por orden) y del Rey.
+        /// Solo estético (no cambia la dificultad): rejillas pequeñas y cómodas.</summary>
+        public static readonly int[] GeneralGrids = { 4, 4, 5, 5 };
+        public const int ReyGrid = 6;
 
         // -------------------------------------------------------------------
         // Utilidades internas

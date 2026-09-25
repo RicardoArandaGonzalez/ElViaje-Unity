@@ -165,6 +165,9 @@ namespace ElViaje.App
         /// <summary>Fondo con la imagen del General/Rey de la región, cubriendo el elemento.</summary>
         public static void ApplyBoss(VisualElement ve, Region region) => ApplyCover(ve, Boss(region));
 
+        /// <summary>Imagen del jefe mostrada completa (contain) para ver más del arte.</summary>
+        public static void ApplyBossContain(VisualElement ve, Region region) => ApplyFit(ve, Boss(region), BackgroundSizeType.Contain);
+
         static void ApplyCover(VisualElement ve, Texture2D tex) => ApplyFit(ve, tex, BackgroundSizeType.Cover);
 
         /// <summary>Fondo con una imagen suelta, mostrada completa (contain) y centrada.</summary>

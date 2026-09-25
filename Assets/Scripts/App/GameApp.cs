@@ -29,6 +29,8 @@ namespace ElViaje.App
         AudioSource musicMain, musicBoss;
         bool muted;
         bool combatFlashing;
+        const float BaseMainVol = 0.35f, BaseBossVol = 0.4f;
+        float musicVolume = 1f;
 
         void Start()
         {
@@ -162,6 +164,14 @@ namespace ElViaje.App
                 var g = SaveSystem.Load();
                 if (g != null) { selectedCardId = null; controller.LoadGame(g); }
             };
+
+            view.Volume = musicVolume;
+            view.OnSetVolume = v =>
+            {
+                musicVolume = Mathf.Clamp01(v);
+                if (musicMain != null) musicMain.volume = BaseMainVol * musicVolume;
+                if (musicBoss != null) musicBoss.volume = BaseBossVol * musicVolume;
+            };
         }
 
         void OnStateChanged(GameState s)
@@ -193,13 +203,13 @@ namespace ElViaje.App
             musicMain = gameObject.AddComponent<AudioSource>();
             musicMain.clip = Resources.Load<AudioClip>("Audio/music-main");
             musicMain.loop = true;
-            musicMain.volume = 0.35f;
+            musicMain.volume = BaseMainVol * musicVolume;
             musicMain.playOnAwake = false;
 
             musicBoss = gameObject.AddComponent<AudioSource>();
             musicBoss.clip = Resources.Load<AudioClip>("Audio/music-boss");
             musicBoss.loop = true;
-            musicBoss.volume = 0.4f;
+            musicBoss.volume = BaseBossVol * musicVolume;
             musicBoss.playOnAwake = false;
         }
 
