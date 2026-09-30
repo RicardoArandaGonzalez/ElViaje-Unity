@@ -43,6 +43,7 @@ namespace ElViaje.App
 
         // Personaje animado sobre el tablero.
         const float HeroW = 66f, HeroH = 84f, HeroFootPad = 24f;
+        const float CastleW = 116f, CastleH = 77f; // el castillo sobresale de su casilla (64px)
         const float MoveDurationPerTileMs = 300f; // velocidad de desplazamiento por casilla
         VisualElement heroEl;
         bool walking;
@@ -337,9 +338,14 @@ namespace ElViaje.App
                 {
                     // arte aplicado
                 }
+                else if (card.Kind == CardKind.Castillo)
+                {
+                    // Base tenue; el castillo grande se dibuja como overlay que sobresale.
+                    box.style.backgroundColor = new StyleColor(new Color(0f, 0f, 0f, 0.22f));
+                }
                 else
                 {
-                    // Sin arte (castillo / rey): caja de color + texto.
+                    // Sin arte (rey): caja de color + texto.
                     box.style.backgroundColor = new StyleColor(KindColor(card.Kind));
                     var arrows = new Label(Arrows(card.Connections));
                     arrows.style.color = new StyleColor(Ink);
@@ -439,7 +445,7 @@ namespace ElViaje.App
                 CardSprites.ApplyImageCover(box, "general-" + Cards.RegionId(region.Value));
                 return true;
             }
-            return false;
+            return false; // castillo/rey: sin arte en la casilla (el castillo se dibuja como overlay grande)
         }
 
         static string Hint(GameState s)
@@ -449,7 +455,10 @@ namespace ElViaje.App
                 case Phase.Draw: return "Roba una carta del mazo →";
                 case Phase.Play: return "Selecciona una carta de tu mano ↓";
                 case Phase.Roll: return "Tira el dado →";
-                case Phase.Move: return "Muévete libremente o termina el turno";
+                case Phase.Move:
+                    return s.LastRoll.HasValue
+                        ? $"Movimiento: {s.MovesLeft}/{s.LastRoll} · muévete o termina turno"
+                        : "Muévete libremente o termina el turno";
                 case Phase.World: return "Turno del Mundo…";
                 default: return "";
             }
@@ -522,6 +531,7 @@ namespace ElViaje.App
             content.style.position = Position.Absolute;
             content.Add(BoardGrid(s));
             viewport.Add(content);
+            AddCastle(s); // el Castillo del Rey se dibuja grande, sobresaliendo de su casilla
             AddHero(s); // personaje animado (idle) sobre la casilla del Party
 
             viewport.RegisterCallback<PointerDownEvent>(e =>
@@ -655,6 +665,35 @@ namespace ElViaje.App
         {
             heroEl.style.left = cx - HeroW / 2f;
             heroEl.style.top = cy - HeroH + HeroFootPad;
+        }
+
+        // Dibuja el Castillo del Rey Demonio como sprite grande que sobresale de su
+        // casilla (contenido, no recortado), para llamar la atención del jugador.
+        void AddCastle(GameState s)
+        {
+            if (content == null) return;
+            PlacedCard castle = null;
+            foreach (var c in s.Grid.Values) if (c.Kind == CardKind.Castillo) { castle = c; break; }
+            if (castle == null) return;
+
+            var el = new VisualElement();
+            el.pickingMode = PickingMode.Ignore; // el clic sigue llegando a la casilla debajo
+            el.style.position = Position.Absolute;
+            el.style.width = CastleW;
+            el.style.height = CastleH;
+            var (cx, cy) = CellCenter(castle.X, castle.Y);
+            el.style.left = cx - CastleW / 2f;
+            el.style.top = cy - CastleH * 0.70f; // base apoyada en la casilla, torres hacia arriba
+            var tex = CardSprites.Image("castle");
+            if (tex != null)
+            {
+                el.style.backgroundImage = new StyleBackground(tex);
+                el.style.backgroundRepeat = new StyleBackgroundRepeat(new BackgroundRepeat(Repeat.NoRepeat, Repeat.NoRepeat));
+                el.style.backgroundSize = new StyleBackgroundSize(new BackgroundSize(BackgroundSizeType.Contain));
+                el.style.backgroundPositionX = new StyleBackgroundPosition(new BackgroundPosition(BackgroundPositionKeyword.Center));
+                el.style.backgroundPositionY = new StyleBackgroundPosition(new BackgroundPosition(BackgroundPositionKeyword.Bottom));
+            }
+            content.Add(el);
         }
 
         void AddHero(GameState s)
@@ -1753,7 +1792,8 @@ namespace ElViaje.App
             bossBox.style.overflow = Overflow.Hidden;
             bossBox.style.borderTopLeftRadius = 6; bossBox.style.borderTopRightRadius = 6;
             bossBox.style.borderBottomLeftRadius = 6; bossBox.style.borderBottomRightRadius = 6;
-            CardSprites.ApplyBoss(bossBox, pc.Region); // cover: llena el recuadro
+            if (pc.IsRey) CardSprites.ApplyImageCover(bossBox, "boss-rey"); // fondo propio del Rey Demonio
+            else CardSprites.ApplyBoss(bossBox, pc.Region);                // cover: llena el recuadro
             var dim = new VisualElement();
             dim.style.position = Position.Absolute;
             dim.style.left = 0; dim.style.right = 0; dim.style.top = 0; dim.style.bottom = 0;

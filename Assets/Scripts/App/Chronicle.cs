@@ -115,6 +115,8 @@ namespace ElViaje.App
                     paras.Add("Finalmente llegó hasta el Castillo del Rey Demonio, pero fue derrotado luchando valientemente contra el mal que había perseguido durante toda su aventura.");
                 else if (!string.IsNullOrEmpty(defeat.Name))
                     paras.Add($"Finalmente se enfrentó a {defeat.Name} y fue derrotado luchando valientemente.");
+                else if ((defeat.Extra ?? "").Contains("Mazo"))
+                    paras.Add("Su viaje terminó antes de alcanzar su destino: el Rey Demonio destruyó el mundo antes de que pudiera ser detenido.");
                 else
                     paras.Add($"Su viaje terminó antes de alcanzar su destino: {CleanReason(defeat.Extra)}.");
             }

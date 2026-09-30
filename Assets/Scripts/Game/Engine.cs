@@ -73,6 +73,9 @@ namespace ElViaje.Game
 
         private static int MovementBonus(GameState s) => s.Party.Members.Any(m => m.IsHeroine) ? 1 : 0;
 
+        /// <summary>Bono de movimiento del Party (Mago: +1). Público para la UI.</summary>
+        public static int MovesBonus(GameState s) => MovementBonus(s);
+
         public static bool IsPossessed(GameState s) => s.Hand.Any(id => Cards.GetCard(id).Kind == CardKind.General);
         private static string PossessedGeneralId(GameState s)
             => s.Hand.FirstOrDefault(id => Cards.GetCard(id).Kind == CardKind.General);
@@ -260,7 +263,15 @@ namespace ElViaje.Game
         {
             if (s.Phase != Phase.Draw) return s;
             if (IsPossessed(s)) { s.Phase = Phase.Play; return s; }
-            if (s.Deck.Count == 0) return Lose(s, "El Mazo de Aventura se agotó (§32).");
+            if (s.Deck.Count == 0)
+            {
+                // Mazo vacío: solo se pierde si tampoco quedan cartas en la mano.
+                // Si aún hay cartas, el turno continúa sin robar.
+                if (s.Hand.Count == 0) return Lose(s, "El Mazo de Aventura se agotó (§32).");
+                PushLog(s, LogKind.Player, "El Mazo está vacío: juegas sin robar.");
+                s.Phase = Phase.Play;
+                return s;
+            }
             string id = s.Deck[0];
             s.Deck.RemoveAt(0);
             s.Hand.Add(id);
@@ -311,6 +322,12 @@ namespace ElViaje.Game
                 };
                 AddChronicle(s, "start", card.Name, kind);
                 ResolveTile(s, action.X, action.Y, chronicle: false);
+                // Primer turno: con una sola carta no hay adónde moverse, así que no se
+                // tira el dado; se pasa directo al turno del Mundo.
+                s.MovesLeft = 0;
+                s.Phase = Phase.World;
+                PushLog(s, LogKind.System, "Colocas tu primera carta. Turno del Mundo.");
+                return s;
             }
             s.Phase = Phase.Roll;
             return s;
@@ -621,6 +638,10 @@ namespace ElViaje.Game
         private static GameState DoWorldStep(GameState s)
         {
             if (s.Phase != Phase.World || s.PendingWorldPlacement != null) return s;
+            // Tras aparecer el Castillo, el Mundo ya no roba ni juega cartas: el Mazo
+            // restante son los turnos que le quedan al jugador para llegar y vencer al
+            // Rey (cada turno el jugador roba 1; al agotarse el Mazo, el mundo cae).
+            if (s.CastleSpawned) return EndWorld(s);
             if (s.Deck.Count == 0) return Lose(s, "El Mundo debía robar y el Mazo está vacío (§32).");
             string id = s.Deck[0];
             s.Deck.RemoveAt(0);

@@ -124,7 +124,15 @@ namespace ElViaje.App
                 if (rolling) return;
                 rolling = true;
                 PlayDieRoll(
-                    resolve: () => { controller.Dispatch(GameAction.Roll()); return controller.State?.LastRoll ?? 1; },
+                    resolve: () =>
+                    {
+                        controller.Dispatch(GameAction.Roll());
+                        var st = controller.State;
+                        if (st == null) return 1;
+                        // El dado (d6) muestra la tirada base; el +1 del Mago se refleja
+                        // en el movimiento total (barra superior), no en la cara del dado.
+                        return (st.LastRoll ?? 1) - Engine.MovesBonus(st);
+                    },
                     onFinished: () => rolling = false);
             };
 
