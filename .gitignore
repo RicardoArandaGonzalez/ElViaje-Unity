@@ -41,3 +41,7 @@ crashlytics-build.properties
 # OS
 .DS_Store
 Thumbs.db
+
+# Temp de build / APKs locales
+.utmp/
+Builds/
