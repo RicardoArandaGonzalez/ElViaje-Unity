@@ -45,3 +45,7 @@ Thumbs.db
 # Temp de build / APKs locales
 .utmp/
 Builds/
+
+# Claves de firma — NUNCA subir
+*.keystore
+*.jks
