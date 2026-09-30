@@ -38,7 +38,7 @@ Juegos → Juegos de mesa (Board)
 mesa, solitario, aventura, cartas, estrategia, roguelike, offline
 
 ## Correo de contacto (visible en la ficha)
-ricardo@360healthsystems.com   ← cámbialo si quieres otro
+agricardo18@gmail.com
 
 ## Clasificación de contenido (respuestas típicas para este juego)
 - Violencia: fantasía/ligera (combate por casillas, sin sangre realista).
